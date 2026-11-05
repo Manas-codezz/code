@@ -95,7 +95,7 @@ def check_reading(text: str) -> list[dict]:
     sentences = re.split(r"[.!?]+", text)
     sentences = [s for s in sentences if s.strip()]
     words = re.findall(r"[A-Za-z']+", text)
-    if len(sentences) < 2 or len(words) < 20:
+    if not sentences or len(words) < 20:
         return []
 
     def syllables(w: str) -> int:

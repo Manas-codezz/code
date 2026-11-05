@@ -88,7 +88,8 @@ def test_reading_level_flags_dense_prose():
 def test_missing_disclaimer_is_critical():
     out = compliance.check("Send USD 9.99 today for the plan", "email")
     assert out and out[0]["severity"] == "critical"
-    assert "disclaimer" in out[0]["rule"].lower()
+    assert any("disclaimer" in f["rule"].lower() for f in out)
+    assert any("Amount" in f["rule"] for f in out)   # price not in facts
 
 
 def test_disclaimer_present_passes():

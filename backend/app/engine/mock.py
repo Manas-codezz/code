@@ -17,7 +17,7 @@ def findings(text: str) -> list["Finding"]:  # noqa: F821
     if "!!" in text or text.count("!") > 1:
         add("tone", "warning", "Max one exclamation mark per post",
             "!", "Keep a single exclamation mark at most.")
-    for w in ("hurry", "act now", "before it's gone", "free forever"):
+    for w in ("hurry", "act now", "before it's gone"):
         if w in low:
             add("tone", "critical", "Urgency / pressure tactics are off-tone",
                 w, "Remove urgency; state the benefit calmly.")

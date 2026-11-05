@@ -17,6 +17,7 @@ class Finding(BaseModel):
     suggestion: str = ""
     accepted: int = 0          # 0=pending 1=accepted 2=dismissed
     confidence: float = 0.6    # 0.0-1.0 model certainty (human-review cue)
+    evidence: str = ""         # source attribution: fact/guideline/glossary
 
 
 class ContentCreate(BaseModel):

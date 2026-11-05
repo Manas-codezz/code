@@ -216,19 +216,29 @@ def run_review(cid: int, request: Request, force_mock: bool = False,
 
         findings, llm_used, latency, provider, tokens = engine.review(
             row["text"], use_mock=force_mock)
-        findings += [Finding(**d) for d in a11y.check(row["text"])]
-        findings += [Finding(**d)
-                     for d in compliance.check(row["text"], row["type"])]
+
+        def _stamp(items: list[dict], source: str) -> list[Finding]:
+            for d in items:
+                d.setdefault("evidence", source)
+            return [Finding(**d) for d in items]
+
+        findings += _stamp(a11y.check(row["text"]),
+                           "Brand accessibility guideline (WCAG 2.1 AA)")
+        findings += _stamp(
+            compliance.check(row["text"], row["type"]),
+            "Guideline: Claims & Compliance")
         if row["image_path"]:
-            findings += visual.check(row["image_path"])
+            findings += _stamp(visual.check(row["image_path"]),
+                               "Guideline: Visual Identity")
 
         conn.execute("DELETE FROM finding WHERE content_id=?", (cid,))
         for f in findings:
             conn.execute(
                 "INSERT INTO finding (content_id, category, severity, rule,"
-                " excerpt, suggestion, confidence) VALUES (?,?,?,?,?,?,?)",
+                " excerpt, suggestion, confidence, evidence)"
+                " VALUES (?,?,?,?,?,?,?,?)",
                 (cid, f.category, f.severity, f.rule, f.excerpt,
-                 f.suggestion, f.confidence))
+                 f.suggestion, f.confidence, f.evidence))
         # SLA timer: review window starts at submission
         conn.execute(
             "UPDATE content SET status='review', sla_due_at="

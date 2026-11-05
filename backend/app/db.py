@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS finding (
     suggestion  TEXT NOT NULL DEFAULT '',
     accepted    INTEGER NOT NULL DEFAULT 0,   -- 0=pending 1=accepted 2=dismissed
     confidence  REAL NOT NULL DEFAULT 0.6,
+    evidence    TEXT NOT NULL DEFAULT '',     -- source attribution
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -129,6 +130,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
     for table, col, ddl in (
         ("finding", "confidence", "ALTER TABLE finding ADD COLUMN "
                                   "confidence REAL NOT NULL DEFAULT 0.6"),
+        ("finding", "evidence", "ALTER TABLE finding ADD COLUMN "
+                                "evidence TEXT NOT NULL DEFAULT ''"),
         ("audit", "tokens", "ALTER TABLE audit ADD COLUMN "
                             "tokens INTEGER NOT NULL DEFAULT 0"),
         ("audit", "prev_hash", "ALTER TABLE audit ADD COLUMN "
