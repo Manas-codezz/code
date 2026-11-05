@@ -63,8 +63,27 @@ CREATE TABLE IF NOT EXISTS audit (
     at         TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS user (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    email         TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    role          TEXT NOT NULL DEFAULT 'creator', -- creator|reviewer|manager|admin
+    team          TEXT NOT NULL DEFAULT 'marketing',
+    active        INTEGER NOT NULL DEFAULT 1,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS refresh_token (
+    jti        TEXT PRIMARY KEY,
+    user_id    INTEGER NOT NULL REFERENCES user(id),
+    expires_at TEXT NOT NULL,
+    revoked    INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_finding_content ON finding(content_id);
 CREATE INDEX IF NOT EXISTS idx_content_status  ON content(status);
+CREATE INDEX IF NOT EXISTS idx_user_email      ON user(email);
 """
 
 

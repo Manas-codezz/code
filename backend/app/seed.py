@@ -130,6 +130,30 @@ SAMPLE_CONTENT = [
 ]
 
 
+DEMO_USERS = [
+    # email, password, role, team  (documented in README — demo creds)
+    ("creator@brandguard.demo", "creator123", "creator", "marketing"),
+    ("reviewer@brandguard.demo", "reviewer123", "reviewer", "marketing"),
+    ("manager@brandguard.demo", "manager123", "manager", "brand"),
+    ("admin@brandguard.demo", "admin12345", "admin", "brand"),
+]
+
+
+def ensure_users() -> None:
+    """Idempotent: create demo accounts if missing (fresh DB / first boot)."""
+    from .auth import hash_password
+    with db.get() as conn:
+        for email, pw, role, team in DEMO_USERS:
+            if conn.execute("SELECT 1 FROM user WHERE email=?",
+                            (email,)).fetchone():
+                continue
+            conn.execute(
+                "INSERT INTO user (email, password_hash, role, team) "
+                "VALUES (?,?,?,?)",
+                (email, hash_password(pw), role, team))
+        conn.commit()
+
+
 def seed(reset: bool = False) -> dict:
     with db.get() as conn:
         if reset:

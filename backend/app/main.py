@@ -6,10 +6,13 @@ import uuid
 from contextlib import asynccontextmanager
 from collections import defaultdict, deque
 from pathlib import Path
+from typing import Literal
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
+from fastapi import (FastAPI, HTTPException, UploadFile, File, Form, Request,
+                     Body, Depends)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 
 from . import db
 from .settings import settings
@@ -17,13 +20,15 @@ from .models import (ContentCreate, ContentOut, ContentWithFindings, Finding,
                       FindingPatch, ReviewResult, AnalyticsSummary,
                       CategoryCount)
 from .engine import review as engine, a11y, visual, compliance
-from . import seed
+from . import seed, auth
+from .auth import current_user, require_role
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     db.init()
     seed.seed()
+    seed.ensure_users()
     Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
     yield
 
@@ -75,14 +80,97 @@ def health() -> dict:
             "llm_available": llm.available()}
 
 
+# ---------- auth (full JWT) ----------
+class LoginBody(BaseModel):
+    email: str
+    password: str
+
+
+class UserCreate(BaseModel):
+    email: str
+    password: str = Field(min_length=8)
+    role: Literal["creator", "reviewer", "manager", "admin"] = "creator"
+    team: str = "marketing"
+
+
+@app.post("/auth/login")
+def login(body: LoginBody):
+    with db.get() as conn:
+        user = db.one(conn, "SELECT * FROM user WHERE email=? AND active=1",
+                      (body.email.lower().strip(),))
+    if not user or not auth.verify_password(body.password,
+                                            user["password_hash"]):
+        raise HTTPException(401, "Invalid credentials")  # same msg both cases
+    access = auth.create_access(user)
+    refresh, _ = auth.create_refresh(user)
+    return {"access_token": access, "refresh_token": refresh,
+            "token_type": "bearer",
+            "user": {"id": user["id"], "email": user["email"],
+                     "role": user["role"], "team": user["team"]}}
+
+
+@app.post("/auth/refresh")
+def refresh(body: dict = Body(...)):
+    token = body.get("refresh_token", "")
+    if not token:
+        raise HTTPException(400, "refresh_token required")
+    claims = auth.decode_refresh(token)
+    auth.revoke(claims["jti"])                      # rotation: old dies
+    with db.get() as conn:
+        user = db.one(conn, "SELECT * FROM user WHERE id=? AND active=1",
+                      (claims["sub"],))
+    if not user:
+        raise HTTPException(401, "User gone")
+    access = auth.create_access(user)
+    new_refresh, _ = auth.create_refresh(user)
+    return {"access_token": access, "refresh_token": new_refresh,
+            "token_type": "bearer"}
+
+
+@app.post("/auth/logout")
+def logout(request: Request):
+    header = request.headers.get("Authorization", "")
+    if header.lower().startswith("bearer "):
+        try:
+            claims = auth._decode(header[7:].strip(), "refresh")
+            auth.revoke(claims["jti"])
+        except HTTPException:
+            pass                                   # access token: client drops it
+    return {"logged_out": True}
+
+
+@app.get("/auth/me")
+def me(user: dict = Depends(current_user)):
+    return user
+
+
+@app.post("/auth/users", status_code=201)
+def create_user(body: UserCreate, _: dict = Depends(
+        require_role("admin"))):
+    with db.get() as conn:
+        if db.one(conn, "SELECT id FROM user WHERE email=?",
+                  (body.email.lower().strip(),)):
+            raise HTTPException(409, "email already registered")
+        cur = conn.execute(
+            "INSERT INTO user (email, password_hash, role, team) "
+            "VALUES (?,?,?,?)",
+            (body.email.lower().strip(), auth.hash_password(body.password),
+             body.role, body.team))
+        conn.commit()
+        row = db.one(conn, "SELECT id, email, role, team FROM user "
+                           "WHERE id=?", (cur.lastrowid,))
+    return row
+
+
 # ---------- content ----------
 @app.post("/content", response_model=ContentOut, status_code=201)
-def create_content(body: ContentCreate):
+def create_content(body: ContentCreate,
+                   user: dict = Depends(current_user)):
     with db.get() as conn:
         cur = conn.execute(
             "INSERT INTO content (type, title, text, channel, created_by)"
             " VALUES (?,?,?,?,?)",
-            (body.type, body.title, body.text, body.channel, body.created_by))
+            (body.type, body.title, body.text, body.channel, user["email"]))
         conn.commit()
         row = db.one(conn, "SELECT * FROM content WHERE id=?",
                      (cur.lastrowid,))
@@ -90,7 +178,8 @@ def create_content(body: ContentCreate):
 
 
 @app.get("/content", response_model=list[ContentOut])
-def list_content(status: str | None = None):
+def list_content(status: str | None = None,
+                 user: dict = Depends(current_user)):
     with db.get() as conn:
         if status:
             return db.rows(conn, "SELECT * FROM content WHERE status=? "
@@ -99,7 +188,7 @@ def list_content(status: str | None = None):
 
 
 @app.get("/content/{cid}", response_model=ContentWithFindings)
-def get_content(cid: int):
+def get_content(cid: int, user: dict = Depends(current_user)):
     with db.get() as conn:
         row = db.one(conn, "SELECT * FROM content WHERE id=?", (cid,))
         if not row:
@@ -112,7 +201,8 @@ def get_content(cid: int):
 
 # ---------- review (the core endpoint) ----------
 @app.post("/content/{cid}/review", response_model=ReviewResult)
-def run_review(cid: int, request: Request, force_mock: bool = False):
+def run_review(cid: int, request: Request, force_mock: bool = False,
+               user: dict = Depends(current_user)):
     rate_limit(request)                      # protect LLM spend
     with db.get() as conn:
         row = db.one(conn, "SELECT * FROM content WHERE id=?", (cid,))
@@ -139,7 +229,7 @@ def run_review(cid: int, request: Request, force_mock: bool = False):
         conn.execute(
             "INSERT INTO audit (content_id, actor, action, detail, tokens)"
             " VALUES (?,?,?,?,?)",
-            (cid, row["created_by"], "review",
+            (cid, user["email"], "review",
              f"{len(findings)} findings ({provider}), {latency}ms",
              tokens))
         conn.commit()
@@ -153,7 +243,8 @@ def run_review(cid: int, request: Request, force_mock: bool = False):
 
 
 @app.patch("/findings/{fid}", response_model=Finding)
-def patch_finding(fid: int, body: FindingPatch):
+def patch_finding(fid: int, body: FindingPatch,
+                  user: dict = Depends(current_user)):
     with db.get() as conn:
         row = db.one(conn, "SELECT * FROM finding WHERE id=?", (fid,))
         if not row:
@@ -163,7 +254,7 @@ def patch_finding(fid: int, body: FindingPatch):
         conn.execute(
             "INSERT INTO audit (content_id, actor, action, detail)"
             " VALUES (?,?,?,?)",
-            (row["content_id"], "creator", "finding_update",
+            (row["content_id"], user["email"], "finding_update",
              f"finding {fid} -> {body.accepted}"))
         conn.commit()
         return db.one(conn, "SELECT * FROM finding WHERE id=?", (fid,))
@@ -171,7 +262,8 @@ def patch_finding(fid: int, body: FindingPatch):
 
 # ---------- workflow ----------
 @app.post("/content/{cid}/approve", response_model=ContentOut)
-def approve(cid: int, actor: str = "manager"):
+def approve(cid: int, user: dict = Depends(require_role("manager"))):
+    actor = user["email"]
     with db.get() as conn:
         row = db.one(conn, "SELECT * FROM content WHERE id=?", (cid,))
         if not row:
@@ -193,7 +285,9 @@ def approve(cid: int, actor: str = "manager"):
 
 
 @app.post("/content/{cid}/request-changes", response_model=ContentOut)
-def request_changes(cid: int, actor: str = "manager"):
+def request_changes(cid: int,
+                    user: dict = Depends(require_role("manager"))):
+    actor = user["email"]
     with db.get() as conn:
         if not db.one(conn, "SELECT id FROM content WHERE id=?", (cid,)):
             raise HTTPException(404, "content not found")
@@ -207,7 +301,8 @@ def request_changes(cid: int, actor: str = "manager"):
 
 
 @app.get("/audit")
-def audit_log(limit: int = 100):
+def audit_log(limit: int = 100,
+              user: dict = Depends(require_role("manager"))):
     with db.get() as conn:
         return db.rows(conn, "SELECT * FROM audit ORDER BY id DESC LIMIT ?",
                        (limit,))
@@ -215,7 +310,7 @@ def audit_log(limit: int = 100):
 
 # ---------- analytics ----------
 @app.get("/analytics/summary", response_model=AnalyticsSummary)
-def analytics():
+def analytics(user: dict = Depends(require_role("manager"))):
     with db.get() as conn:
         total = db.one(conn, "SELECT COUNT(*) n FROM content")["n"]
         approved = db.one(conn, "SELECT COUNT(*) n FROM content"
@@ -255,7 +350,8 @@ def analytics():
 # ---------- uploads (image content) ----------
 @app.post("/content/{cid}/upload", response_model=ContentOut)
 async def upload_image(cid: int, file: UploadFile = File(...),
-                       alt: str = Form("")):
+                       alt: str = Form(""),
+                       user: dict = Depends(current_user)):
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(400, "file must be an image")
 
