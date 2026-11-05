@@ -169,6 +169,50 @@ def test_analytics_requires_manager_and_shapes():
     r = client.get("/analytics/summary", headers=hdr()).json()
     assert r["total_content"] >= 3
     assert "compliance_rate" in r and "llm_calls" in r
+    # Phase F fields
+    assert isinstance(r["by_team"], list) and r["by_team"]
+    assert r["by_team"][0]["team"] and "compliance_rate" in r["by_team"][0]
+    assert len(r["heat_map"]) == 15          # 5 categories x 3 severities
+    assert all({"category", "severity", "count"} <= set(h)
+               for h in r["heat_map"])
+    assert isinstance(r["overdue_reviews"], list)
+    assert isinstance(r["stale_facts"], list)
+
+
+def test_stale_facts_flagged():
+    r = client.get("/analytics/summary", headers=hdr()).json()
+    stale = r["stale_facts"]
+    assert stale, "seed contains facts verified >90 days ago"
+    assert all(f["days_old"] > 90 for f in stale)
+    assert all(f["verified_at"] for f in stale)
+
+
+def test_overdue_review_reported():
+    # push seeded content past its SLA
+    from app import db as appdb
+    with appdb.get() as conn:
+        conn.execute(
+            "UPDATE content SET status='review',"
+            " sla_due_at='2000-01-01T00:00:00' "
+            "WHERE id=(SELECT MIN(id) FROM content)")
+        conn.commit()
+    r = client.get("/analytics/summary", headers=hdr()).json()
+    assert r["overdue_reviews"], "past-SLA review must be reported"
+    assert r["overdue_reviews"][0]["hours_late"] > 0
+    # restore so later tests see normal state
+    with appdb.get() as conn:
+        conn.execute(
+            "UPDATE content SET status='draft', sla_due_at=NULL "
+            "WHERE sla_due_at='2000-01-01T00:00:00'")
+        conn.commit()
+
+
+def test_content_inherits_creators_team():
+    r = client.post("/content", headers=hdr("creator"), json={
+        "type": "text", "title": "team check", "text": "hi",
+        "channel": "web"})
+    assert r.status_code == 201
+    assert r.json()["team"] == "marketing"     # creator's team
 
 
 def test_audit_trail_recorded():

@@ -68,6 +68,16 @@ class CategoryCount(BaseModel):
     suggestion: int
 
 
+class TeamScore(BaseModel):
+    team: str
+    total: int
+    approved: int
+    pending: int
+    findings: int
+    criticals: int
+    compliance_rate: float
+
+
 class AnalyticsSummary(BaseModel):
     total_content: int
     approved: int
@@ -79,3 +89,7 @@ class AnalyticsSummary(BaseModel):
     findings_by_severity: dict[str, int]
     llm_calls: int = 0
     total_tokens: int = 0
+    by_team: list[TeamScore] = []
+    heat_map: list[dict] = []          # category x severity matrix
+    overdue_reviews: list[dict] = []   # SLA breaches
+    stale_facts: list[dict] = []       # fact store freshness gaps

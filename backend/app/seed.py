@@ -87,13 +87,22 @@ GLOSSARY = [
 ]
 
 FACTS = [
-    ("NovaPay charges USD 4.99/month for the Wallet standard plan.", "Pricing page v12, 2026-10-01"),
-    ("NovaPay Business has 42,000 active subscribers as of Q3 2026.", "Q3 2026 board report"),
-    ("NovaPay platform uptime was 99.97% over the last 12 months.", "Status page, rolling 12-mo"),
-    ("NovaPay is not a bank; banking services are provided by partner institutions, Members FDIC.", "Legal review 2026-09-15"),
-    ("NovaPay Insights starts at USD 29/month.", "Pricing page v12, 2026-10-01"),
-    ("Transfers between NovaPay Wallets settle instantly.", "Product spec v4.2"),
-    ("NovaPay supports 34 countries for cross-border transfers.", "Coverage doc, 2026-10-20"),
+    # (claim, source, verified_at) — old dates demo the stale-fact detector
+    ("NovaPay charges USD 4.99/month for the Wallet standard plan.",
+     "Pricing page v12, 2026-10-01", "2026-10-01"),
+    ("NovaPay Business has 42,000 active subscribers as of Q3 2026.",
+     "Q3 2026 board report", "2026-10-15"),
+    ("NovaPay platform uptime was 99.97% over the last 12 months.",
+     "Status page, rolling 12-mo", "2026-11-01"),
+    ("NovaPay is not a bank; banking services are provided by partner "
+     "institutions, Members FDIC.",
+     "Legal review 2026-09-15", "2026-09-15"),
+    ("NovaPay Insights starts at USD 29/month.",
+     "Pricing page v12, 2026-10-01", "2026-10-01"),
+    ("Transfers between NovaPay Wallets settle instantly.",
+     "Product spec v4.2", "2025-06-15"),          # stale (>90 days)
+    ("NovaPay supports 34 countries for cross-border transfers.",
+     "Coverage doc, 2025-05-10", "2025-05-10"),   # stale
 ]
 
 COLORS = [
@@ -139,6 +148,23 @@ DEMO_USERS = [
 ]
 
 
+def _backfill(conn) -> None:
+    """One-time migration for DBs created before verified_at existed.
+    Only touches NULL rows — never overwrites values edited via the KB API."""
+    if not conn.execute("SELECT 1 FROM fact WHERE verified_at IS NULL "
+                        "LIMIT 1").fetchone():
+        return
+    conn.execute("UPDATE fact SET verified_at='2026-09-15' "
+                 "WHERE verified_at IS NULL")
+    conn.execute(
+        "UPDATE fact SET verified_at='2025-06-15' "
+        "WHERE id=(SELECT MIN(id) FROM fact) AND verified_at='2026-09-15'")
+    conn.execute(
+        "UPDATE fact SET verified_at='2025-05-10' "
+        "WHERE id=(SELECT MAX(id) FROM fact) AND verified_at='2026-09-15'")
+    conn.commit()
+
+
 def ensure_users() -> None:
     """Idempotent: create demo accounts if missing (fresh DB / first boot)."""
     from .auth import hash_password
@@ -161,6 +187,7 @@ def seed(reset: bool = False) -> dict:
                       "glossary", "fact", "brand_color"):
                 conn.execute(f"DELETE FROM {t}")
         if conn.execute("SELECT COUNT(*) c FROM guideline").fetchone()["c"]:
+            _backfill(conn)
             return {"skipped": True}
 
         conn.executemany("INSERT INTO guideline (title, body) VALUES (?, ?)",
@@ -168,8 +195,9 @@ def seed(reset: bool = False) -> dict:
         conn.executemany(
             "INSERT INTO glossary (term, kind, note) VALUES (?, ?, ?)",
             GLOSSARY)
-        conn.executemany("INSERT INTO fact (claim, source) VALUES (?, ?)",
-                         FACTS)
+        conn.executemany(
+            "INSERT INTO fact (claim, source, verified_at) VALUES (?,?,?)",
+            FACTS)
         conn.executemany("INSERT INTO brand_color (hex, name) VALUES (?, ?)",
                          COLORS)
 

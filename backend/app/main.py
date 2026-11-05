@@ -18,7 +18,7 @@ from . import db
 from .settings import settings
 from .models import (ContentCreate, ContentOut, ContentWithFindings, Finding,
                       FindingPatch, ReviewResult, AnalyticsSummary,
-                      CategoryCount)
+                      CategoryCount, TeamScore)
 from .engine import review as engine, a11y, visual, compliance
 from . import seed, auth
 from .auth import current_user, require_role
@@ -173,9 +173,10 @@ def create_content(body: ContentCreate,
                    user: dict = Depends(current_user)):
     with db.get() as conn:
         cur = conn.execute(
-            "INSERT INTO content (type, title, text, channel, created_by)"
-            " VALUES (?,?,?,?,?)",
-            (body.type, body.title, body.text, body.channel, user["email"]))
+            "INSERT INTO content (type, title, text, channel, created_by,"
+            " team) VALUES (?,?,?,?,?,?)",
+            (body.type, body.title, body.text, body.channel,
+             user["email"], user.get("team") or "marketing"))
         conn.commit()
         row = db.one(conn, "SELECT * FROM content WHERE id=?",
                      (cur.lastrowid,))
@@ -352,6 +353,62 @@ def analytics(user: dict = Depends(require_role("manager"))):
         by_sev = {s: 0 for s in ("critical", "warning", "suggestion")}
         by_sev.update({r["severity"]: r["n"] for r in sev_rows})
 
+        # --- per-team compliance (users' teams own content they create) ---
+        team_rows = db.rows(conn, """
+            SELECT c.team,
+                   COUNT(*) total,
+                   SUM(c.status='approved') approved,
+                   SUM(c.status IN ('draft','review','peer_review')) pending
+            FROM content c GROUP BY c.team""")
+        team_find = {
+            r["team"]: r for r in db.rows(conn, """
+                SELECT c.team, COUNT(f.id) findings,
+                       COALESCE(SUM(f.severity='critical'),0) criticals
+                FROM content c LEFT JOIN finding f ON f.content_id=c.id
+                GROUP BY c.team""")}
+        by_team = []
+        for r in team_rows:
+            f = team_find.get(r["team"], {})
+            t = r["total"] or 1
+            by_team.append(TeamScore(
+                team=r["team"], total=r["total"], approved=r["approved"],
+                pending=r["pending"], findings=f.get("findings") or 0,
+                criticals=f.get("criticals") or 0,
+                compliance_rate=round((r["approved"] or 0) / t * 100, 1)))
+
+        # --- category x severity heat map (guideline-gap view) ---
+        heat = {(r["category"], r["severity"]): r["n"]
+                for r in db.rows(conn, "SELECT category, severity, "
+                                       "COUNT(*) n FROM finding "
+                                       "GROUP BY category, severity")}
+        heat_map = [
+            {"category": c, "severity": s, "count": heat.get((c, s), 0)}
+            for c in ("tone", "term", "claim", "a11y", "visual")
+            for s in ("critical", "warning", "suggestion")]
+
+        # --- overdue: in review past SLA ---
+        overdue = db.rows(conn, """
+            SELECT id, title, status, sla_due_at,
+                   CAST(ROUND((julianday('now') - julianday(sla_due_at))
+                       * 24) AS INT) hours_late
+            FROM content
+            WHERE sla_due_at IS NOT NULL
+              AND status IN ('review','peer_review')
+              AND julianday(sla_due_at) < julianday('now')
+            ORDER BY sla_due_at""")
+        # hours_late can come back negative-int cast on NULL; drop nulls
+        overdue = [o for o in overdue if o["hours_late"] is not None]
+
+        # --- stale facts: verified > 90 days ago ---
+        stale = db.rows(conn, """
+            SELECT id, claim, source, verified_at,
+                   CAST(ROUND(julianday('now') - julianday(verified_at))
+                       AS INT) days_old
+            FROM fact
+            WHERE verified_at IS NOT NULL
+              AND julianday('now') - julianday(verified_at) > 90
+            ORDER BY days_old DESC""")
+
     # compliance = approved content with zero unresolved criticals
     compliant = approved
     rate = round(compliant / total * 100, 1) if total else 0.0
@@ -360,7 +417,9 @@ def analytics(user: dict = Depends(require_role("manager"))):
         compliance_rate=rate, total_findings=n_find,
         by_category=[CategoryCount(**c) for c in by_cat],
         most_violated_rules=rules, findings_by_severity=by_sev,
-        llm_calls=cost.get("calls", 0), total_tokens=cost.get("tok", 0))
+        llm_calls=cost.get("calls", 0), total_tokens=cost.get("tok", 0),
+        by_team=by_team, heat_map=heat_map,
+        overdue_reviews=overdue, stale_facts=stale)
 
 
 # ---------- uploads (image content) ----------

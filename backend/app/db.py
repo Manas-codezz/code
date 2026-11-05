@@ -46,9 +46,10 @@ CREATE TABLE IF NOT EXISTS glossary (
 );
 
 CREATE TABLE IF NOT EXISTS fact (
-    id     INTEGER PRIMARY KEY AUTOINCREMENT,
-    claim  TEXT NOT NULL,
-    source TEXT NOT NULL DEFAULT ''
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    claim      TEXT NOT NULL,
+    source     TEXT NOT NULL DEFAULT '',
+    verified_at TEXT                                   -- fact freshness
 );
 
 CREATE TABLE IF NOT EXISTS brand_color (
@@ -144,6 +145,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
                                   "sla_due_at TEXT"),
         ("content", "published_at", "ALTER TABLE content ADD COLUMN "
                                     "published_at TEXT"),
+        ("fact", "verified_at", "ALTER TABLE fact ADD COLUMN "
+                                "verified_at TEXT"),
     ):
         cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
         if col not in cols:
