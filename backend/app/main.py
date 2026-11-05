@@ -22,6 +22,7 @@ from .models import (ContentCreate, ContentOut, ContentWithFindings, Finding,
 from .engine import review as engine, a11y, visual, compliance
 from . import seed, auth
 from .auth import current_user, require_role
+from .kb import router as kb_router
 
 
 @asynccontextmanager
@@ -35,9 +36,11 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="BrandGuard AI", version="0.1.0",
               description="Brand-compliance review engine. AI-generated "
-                          "findings are advisory; a human always makes the "
+                          "findings are advisory — a human always makes the "
                           "final approval decision.",
               lifespan=lifespan)
+
+app.include_router(kb_router)
 
 app.add_middleware(
     CORSMiddleware,
