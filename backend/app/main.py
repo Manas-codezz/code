@@ -11,6 +11,7 @@ from typing import Literal
 from fastapi import (FastAPI, HTTPException, UploadFile, File, Form, Request,
                      Body, Depends)
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -51,6 +52,29 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    resp = await call_next(request)
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("Referrer-Policy", "no-referrer")
+    # no-store: findings carry sensitive brand copy — never cache
+    resp.headers.setdefault("Cache-Control", "no-store")
+    return resp
+
+
+@app.exception_handler(Exception)
+async def unhandled(request: Request, exc: Exception):
+    """Never leak stack traces or DB errors to the client."""
+    import logging
+    logging.getLogger("brandguard").exception(
+        "unhandled error on %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error. "
+                           "The incident was logged with request context."})
 
 # --- rate limiting: in-memory sliding window per IP on /review -------------
 # ponytail: per-process memory — correct for one instance; move to Redis

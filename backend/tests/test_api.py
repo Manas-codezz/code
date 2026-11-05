@@ -226,6 +226,31 @@ def test_audit_trail_recorded():
 
 
 # --- rate limit / upload / 404 ---------------------------------------------
+def test_security_headers_present():
+    r = client.get("/health")
+    assert r.headers.get("X-Content-Type-Options") == "nosniff"
+    assert r.headers.get("X-Frame-Options") == "DENY"
+    assert r.headers.get("Cache-Control") == "no-store"
+
+
+def test_unhandled_errors_do_not_leak():
+    from app.main import app as _app
+    from fastapi import Request
+
+    @_app.get("/boom-test")
+    async def _boom(request: Request):
+        raise ValueError("secret-db-password-leak")
+
+    quiet = TestClient(_app, raise_server_exceptions=False)
+    with quiet:                       # run lifespan on the shared temp DB
+        r = quiet.get("/boom-test")
+    assert r.status_code == 500
+    assert "secret" not in r.text and "Traceback" not in r.text
+    assert "Internal server error" in r.json()["detail"]
+    _app.router.routes[:] = [x for x in _app.router.routes
+                             if getattr(x, "path", None) != "/boom-test"]
+
+
 def test_rate_limit_returns_429():
     old = settings.review_rate_per_min
     settings.review_rate_per_min = 3

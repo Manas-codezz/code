@@ -115,6 +115,15 @@ def grounded(excerpt: str, content: str) -> bool:
     return len(set(toks) & content_toks) / len(set(toks)) >= 0.7
 
 
+def _clean_evidence(v) -> str:
+    """The model sometimes answers evidence with a literal 'none' —
+    replace empty-ish placeholders with an honest default citation."""
+    v = (v or "").strip()
+    if v.lower() in ("", "none", "n/a", "na", "null", "-"):
+        return "Reviewed against retrieved brand guidelines"
+    return v
+
+
 def _parse(raw: str, content: str) -> list[Finding]:
     raw = raw.strip()
     if raw.startswith("```"):
@@ -126,6 +135,7 @@ def _parse(raw: str, content: str) -> list[Finding]:
     for it in items[:_MAX_FINDINGS]:
         try:
             f = Finding(**{**it,
+                           "evidence": _clean_evidence(it.get("evidence")),
                            "confidence": max(0.0, min(1.0, float(
                                it.get("confidence", 0.6))))})
         except Exception:
