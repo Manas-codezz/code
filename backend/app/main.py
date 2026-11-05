@@ -1,0 +1,300 @@
+"""BrandGuard AI — FastAPI app. One file, auto /docs for the frontend."""
+import io
+import re
+import time
+import uuid
+from contextlib import asynccontextmanager
+from collections import defaultdict, deque
+from pathlib import Path
+
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+
+from . import db
+from .settings import settings
+from .models import (ContentCreate, ContentOut, ContentWithFindings, Finding,
+                      FindingPatch, ReviewResult, AnalyticsSummary,
+                      CategoryCount)
+from .engine import review as engine, a11y, visual, compliance
+from . import seed
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    db.init()
+    seed.seed()
+    Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
+    yield
+
+
+app = FastAPI(title="BrandGuard AI", version="0.1.0",
+              description="Brand-compliance review engine. AI-generated "
+                          "findings are advisory; a human always makes the "
+                          "final approval decision.",
+              lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# --- rate limiting: in-memory sliding window per IP on /review -------------
+# ponytail: per-process memory — correct for one instance; move to Redis
+# if you ever run multiple workers/replicas behind a load balancer.
+_hits: dict[str, deque] = defaultdict(deque)
+
+
+def rate_limit(request: Request) -> None:
+    now = time.time()
+    ip = request.client.host if request.client else "unknown"
+    q = _hits[ip]
+    while q and now - q[0] > 60:
+        q.popleft()
+    if len(q) >= settings.review_rate_per_min:
+        raise HTTPException(
+            429, "Review rate limit exceeded "
+                 f"({settings.review_rate_per_min}/min per IP). "
+                 "Try again in a minute.")
+    q.append(now)
+
+
+@app.get("/health")
+def health() -> dict:
+    from .engine import llm
+    # transparency disclosure: identify the AI system and active model
+    return {"status": "ok",
+            "product": "BrandGuard AI",
+            "ai_disclosure": "Findings are AI-generated and advisory — "
+                             "final approval is always human.",
+            "provider": llm.active_name(),
+            "model": llm.active_model(),
+            "llm_available": llm.available()}
+
+
+# ---------- content ----------
+@app.post("/content", response_model=ContentOut, status_code=201)
+def create_content(body: ContentCreate):
+    with db.get() as conn:
+        cur = conn.execute(
+            "INSERT INTO content (type, title, text, channel, created_by)"
+            " VALUES (?,?,?,?,?)",
+            (body.type, body.title, body.text, body.channel, body.created_by))
+        conn.commit()
+        row = db.one(conn, "SELECT * FROM content WHERE id=?",
+                     (cur.lastrowid,))
+    return row
+
+
+@app.get("/content", response_model=list[ContentOut])
+def list_content(status: str | None = None):
+    with db.get() as conn:
+        if status:
+            return db.rows(conn, "SELECT * FROM content WHERE status=? "
+                           "ORDER BY id DESC", (status,))
+        return db.rows(conn, "SELECT * FROM content ORDER BY id DESC")
+
+
+@app.get("/content/{cid}", response_model=ContentWithFindings)
+def get_content(cid: int):
+    with db.get() as conn:
+        row = db.one(conn, "SELECT * FROM content WHERE id=?", (cid,))
+        if not row:
+            raise HTTPException(404, "content not found")
+        row["findings"] = db.rows(
+            conn, "SELECT * FROM finding WHERE content_id=? ORDER BY id",
+            (cid,))
+    return row
+
+
+# ---------- review (the core endpoint) ----------
+@app.post("/content/{cid}/review", response_model=ReviewResult)
+def run_review(cid: int, request: Request, force_mock: bool = False):
+    rate_limit(request)                      # protect LLM spend
+    with db.get() as conn:
+        row = db.one(conn, "SELECT * FROM content WHERE id=?", (cid,))
+        if not row:
+            raise HTTPException(404, "content not found")
+
+        findings, llm_used, latency, provider, tokens = engine.review(
+            row["text"], use_mock=force_mock)
+        findings += [Finding(**d) for d in a11y.check(row["text"])]
+        findings += [Finding(**d)
+                     for d in compliance.check(row["text"], row["type"])]
+        if row["image_path"]:
+            findings += visual.check(row["image_path"])
+
+        conn.execute("DELETE FROM finding WHERE content_id=?", (cid,))
+        for f in findings:
+            conn.execute(
+                "INSERT INTO finding (content_id, category, severity, rule,"
+                " excerpt, suggestion, confidence) VALUES (?,?,?,?,?,?,?)",
+                (cid, f.category, f.severity, f.rule, f.excerpt,
+                 f.suggestion, f.confidence))
+        conn.execute("UPDATE content SET status='review' WHERE id=? "
+                     "AND status='draft'", (cid,))
+        conn.execute(
+            "INSERT INTO audit (content_id, actor, action, detail, tokens)"
+            " VALUES (?,?,?,?,?)",
+            (cid, row["created_by"], "review",
+             f"{len(findings)} findings ({provider}), {latency}ms",
+             tokens))
+        conn.commit()
+        stored = db.rows(conn, "SELECT * FROM finding WHERE content_id=? "
+                         "ORDER BY id", (cid,))
+
+    return ReviewResult(content_id=cid, findings=[Finding(**f)
+                                                  for f in stored],
+                        provider=provider, llm_used=llm_used,
+                        latency_ms=latency, tokens=tokens)
+
+
+@app.patch("/findings/{fid}", response_model=Finding)
+def patch_finding(fid: int, body: FindingPatch):
+    with db.get() as conn:
+        row = db.one(conn, "SELECT * FROM finding WHERE id=?", (fid,))
+        if not row:
+            raise HTTPException(404, "finding not found")
+        conn.execute("UPDATE finding SET accepted=? WHERE id=?",
+                     (body.accepted, fid))
+        conn.execute(
+            "INSERT INTO audit (content_id, actor, action, detail)"
+            " VALUES (?,?,?,?)",
+            (row["content_id"], "creator", "finding_update",
+             f"finding {fid} -> {body.accepted}"))
+        conn.commit()
+        return db.one(conn, "SELECT * FROM finding WHERE id=?", (fid,))
+
+
+# ---------- workflow ----------
+@app.post("/content/{cid}/approve", response_model=ContentOut)
+def approve(cid: int, actor: str = "manager"):
+    with db.get() as conn:
+        row = db.one(conn, "SELECT * FROM content WHERE id=?", (cid,))
+        if not row:
+            raise HTTPException(404, "content not found")
+        crit = db.one(conn, "SELECT COUNT(*) n FROM finding WHERE content_id=?"
+                      " AND severity='critical' AND accepted=0",
+                      (cid,))["n"]
+        if crit:
+            raise HTTPException(
+                409, f"{crit} unresolved critical finding(s) — accept or "
+                     "dismiss them before approving")
+        conn.execute("UPDATE content SET status='approved' WHERE id=?",
+                     (cid,))
+        conn.execute(
+            "INSERT INTO audit (content_id, actor, action, detail)"
+            " VALUES (?,?,?,?)", (cid, actor, "approve", "approved"))
+        conn.commit()
+        return db.one(conn, "SELECT * FROM content WHERE id=?", (cid,))
+
+
+@app.post("/content/{cid}/request-changes", response_model=ContentOut)
+def request_changes(cid: int, actor: str = "manager"):
+    with db.get() as conn:
+        if not db.one(conn, "SELECT id FROM content WHERE id=?", (cid,)):
+            raise HTTPException(404, "content not found")
+        conn.execute("UPDATE content SET status='changes' WHERE id=?",
+                     (cid,))
+        conn.execute(
+            "INSERT INTO audit (content_id, actor, action, detail)"
+            " VALUES (?,?,?,?)", (cid, actor, "request_changes", ""))
+        conn.commit()
+        return db.one(conn, "SELECT * FROM content WHERE id=?", (cid,))
+
+
+@app.get("/audit")
+def audit_log(limit: int = 100):
+    with db.get() as conn:
+        return db.rows(conn, "SELECT * FROM audit ORDER BY id DESC LIMIT ?",
+                       (limit,))
+
+
+# ---------- analytics ----------
+@app.get("/analytics/summary", response_model=AnalyticsSummary)
+def analytics():
+    with db.get() as conn:
+        total = db.one(conn, "SELECT COUNT(*) n FROM content")["n"]
+        approved = db.one(conn, "SELECT COUNT(*) n FROM content"
+                          " WHERE status='approved'")["n"]
+        pending = db.one(conn, "SELECT COUNT(*) n FROM content"
+                         " WHERE status IN ('draft','review')")["n"]
+        n_find = db.one(conn, "SELECT COUNT(*) n FROM finding")["n"]
+
+        by_cat = db.rows(conn, """
+            SELECT category, COUNT(*) count,
+                   SUM(severity='critical')   critical,
+                   SUM(severity='warning')    warning,
+                   SUM(severity='suggestion') suggestion
+            FROM finding GROUP BY category ORDER BY count DESC""")
+        rules = db.rows(conn, """
+            SELECT rule, COUNT(*) count FROM finding
+            GROUP BY rule ORDER BY count DESC LIMIT 10""")
+        sev_rows = db.rows(conn, "SELECT severity, COUNT(*) n "
+                                 "FROM finding GROUP BY severity")
+        cost = db.one(conn, "SELECT COUNT(*) calls, "
+                            "COALESCE(SUM(tokens),0) tok FROM audit "
+                            "WHERE action='review'") or {}
+        by_sev = {s: 0 for s in ("critical", "warning", "suggestion")}
+        by_sev.update({r["severity"]: r["n"] for r in sev_rows})
+
+    # compliance = approved content with zero unresolved criticals
+    compliant = approved
+    rate = round(compliant / total * 100, 1) if total else 0.0
+    return AnalyticsSummary(
+        total_content=total, approved=approved, pending=pending,
+        compliance_rate=rate, total_findings=n_find,
+        by_category=[CategoryCount(**c) for c in by_cat],
+        most_violated_rules=rules, findings_by_severity=by_sev,
+        llm_calls=cost.get("calls", 0), total_tokens=cost.get("tok", 0))
+
+
+# ---------- uploads (image content) ----------
+@app.post("/content/{cid}/upload", response_model=ContentOut)
+async def upload_image(cid: int, file: UploadFile = File(...),
+                       alt: str = Form("")):
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(400, "file must be an image")
+
+    data = await file.read()
+    if len(data) > settings.max_upload_bytes:
+        raise HTTPException(
+            413, f"image exceeds "
+                 f"{settings.max_upload_bytes // (1024 * 1024)}MB limit")
+
+    # verify it really is a decodable image (stops disguised files)
+    try:
+        from PIL import Image
+        probe = Image.open(io.BytesIO(data))
+        probe.verify()
+    except Exception:
+        raise HTTPException(400, "file is not a valid image")
+
+    with db.get() as conn:
+        if not db.one(conn, "SELECT id FROM content WHERE id=?", (cid,)):
+            raise HTTPException(404, "content not found")
+
+    # safe filename: uuid + basename only (no path traversal)
+    safe = f"{cid}_{uuid.uuid4().hex[:8]}.png" if not re.fullmatch(
+        r"[\w.\- ]+\.(png|jpe?g|webp|gif|svg)",
+        Path(file.filename or "").name, re.IGNORECASE) else \
+        f"{cid}_{uuid.uuid4().hex[:8]}_{Path(file.filename).name}"
+    dest = Path(settings.upload_dir) / safe
+    dest.write_bytes(data)
+
+    text = alt  # alt text rides on the text field for a11y checks
+    with db.get() as conn:
+        conn.execute(
+            "UPDATE content SET image_path=?, text=CASE WHEN text='' "
+            "THEN ? ELSE text END, type='image' WHERE id=?",
+            (str(dest), text, cid))
+        conn.commit()
+        return db.one(conn, "SELECT * FROM content WHERE id=?", (cid,))
+
+
+# static files for uploaded images (deploy-safe: served by this app)
+Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads")
