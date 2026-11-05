@@ -34,9 +34,27 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4o"
     llm_timeout: float = 30.0
 
+    # auth (full JWT: access + rotating refresh)
+    jwt_secret: str = ""                # required in prod; dev fallback below
+    jwt_algorithm: str = "HS256"
+    access_ttl_min: int = 60
+    refresh_ttl_days: int = 7
+
+    # workflow
+    sla_hours: int = 24                 # review due window
+
+    # integration
+    webhook_url: str = ""               # publish webhook target ("" = skip)
+    webhook_secret: str = ""            # HMAC-SHA256 signing secret
+
     @property
     def origins(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def secret(self) -> str:
+        # dev-only fallback; prod must set JWT_SECRET
+        return self.jwt_secret or "brandguard-dev-secret-do-not-use-in-prod"
 
 
 settings = Settings()
