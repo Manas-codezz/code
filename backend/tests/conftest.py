@@ -8,3 +8,5 @@ _tmp = Path(tempfile.mkdtemp(prefix="bgtest_"))
 settings.database_path = str(_tmp / "test.db")
 settings.upload_dir = str(_tmp / "uploads")
 settings.llm_provider = "mock"   # tests never spend API tokens
+settings.review_rate_per_min = 10_000  # suite runs many reviews; limiter
+                                      # has its own test (sets 3 explicitly)

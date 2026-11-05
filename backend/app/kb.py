@@ -70,9 +70,8 @@ def bulk_import(body: dict, user: dict = Depends(require_role("manager"))):
                              f"({cols}) VALUES ({ph})", tuple(data.values()))
                 n += 1
             added[kind] = n
-        conn.execute(
-            "INSERT INTO audit (actor, action, detail) VALUES (?,?,?)",
-            (user["email"], "kb_import", f"added={added} skipped={skipped}"))
+        db.log_audit(conn, None, user["email"], "kb_import",
+                     f"added={added} skipped={skipped}")
         conn.commit()
     return {"added": added, "skipped": skipped}
 
@@ -93,10 +92,8 @@ for _kind, _spec in SPEC.items():
             cur = conn.execute(
                 f"INSERT INTO {SPEC[kind]['table']} ({cols}) VALUES ({ph})",
                 tuple(data.values()))
-            conn.execute("INSERT INTO audit (actor, action, detail) "
-                         "VALUES (?,?,?)",
-                         (user["email"], f"kb_create_{kind}",
-                          str(data)[:200]))
+            db.log_audit(conn, None, user["email"], f"kb_create_{kind}",
+                         str(data)[:200])
             conn.commit()
             return db.one(conn, f"SELECT * FROM {SPEC[kind]['table']} "
                                 "WHERE id=?", (cur.lastrowid,))
@@ -111,9 +108,8 @@ for _kind, _spec in SPEC.items():
             sets = ", ".join(f"{k}=?" for k in data)
             conn.execute(f"UPDATE {SPEC[kind]['table']} SET {sets} WHERE id=?",
                          (*data.values(), i))
-            conn.execute("INSERT INTO audit (actor, action, detail) "
-                         "VALUES (?,?,?)",
-                         (user["email"], f"kb_update_{kind}", f"id={i}"))
+            db.log_audit(conn, None, user["email"], f"kb_update_{kind}",
+                         f"id={i}")
             conn.commit()
             return db.one(conn, f"SELECT * FROM {SPEC[kind]['table']} "
                                 "WHERE id=?", (i,))
@@ -125,9 +121,8 @@ for _kind, _spec in SPEC.items():
                                 "WHERE id=?", (i,)):
                 raise HTTPException(404, f"{kind} not found")
             conn.execute(f"DELETE FROM {SPEC[kind]['table']} WHERE id=?", (i,))
-            conn.execute("INSERT INTO audit (actor, action, detail) "
-                         "VALUES (?,?,?)",
-                         (user["email"], f"kb_delete_{kind}", f"id={i}"))
+            db.log_audit(conn, None, user["email"], f"kb_delete_{kind}",
+                         f"id={i}")
             conn.commit()
         return {"deleted": i}
 

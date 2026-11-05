@@ -36,6 +36,9 @@ class ContentOut(BaseModel):
     channel: str
     status: str
     created_by: str
+    team: str = "marketing"
+    sla_due_at: str | None = None
+    published_at: str | None = None
     created_at: str
 
 

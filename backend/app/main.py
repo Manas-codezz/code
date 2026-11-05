@@ -23,6 +23,7 @@ from .engine import review as engine, a11y, visual, compliance
 from . import seed, auth
 from .auth import current_user, require_role
 from .kb import router as kb_router
+from .workflow import router as workflow_router
 
 
 @asynccontextmanager
@@ -41,6 +42,7 @@ app = FastAPI(title="BrandGuard AI", version="0.1.0",
               lifespan=lifespan)
 
 app.include_router(kb_router)
+app.include_router(workflow_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -227,14 +229,14 @@ def run_review(cid: int, request: Request, force_mock: bool = False,
                 " excerpt, suggestion, confidence) VALUES (?,?,?,?,?,?,?)",
                 (cid, f.category, f.severity, f.rule, f.excerpt,
                  f.suggestion, f.confidence))
-        conn.execute("UPDATE content SET status='review' WHERE id=? "
-                     "AND status='draft'", (cid,))
+        # SLA timer: review window starts at submission
         conn.execute(
-            "INSERT INTO audit (content_id, actor, action, detail, tokens)"
-            " VALUES (?,?,?,?,?)",
-            (cid, user["email"], "review",
-             f"{len(findings)} findings ({provider}), {latency}ms",
-             tokens))
+            "UPDATE content SET status='review', sla_due_at="
+            "datetime('now', ?) WHERE id=? AND status='draft'",
+            (f"+{settings.sla_hours} hours", cid))
+        db.log_audit(conn, cid, user["email"], "review",
+                     f"{len(findings)} findings ({provider}), {latency}ms",
+                     tokens)
         conn.commit()
         stored = db.rows(conn, "SELECT * FROM finding WHERE content_id=? "
                          "ORDER BY id", (cid,))
@@ -254,11 +256,8 @@ def patch_finding(fid: int, body: FindingPatch,
             raise HTTPException(404, "finding not found")
         conn.execute("UPDATE finding SET accepted=? WHERE id=?",
                      (body.accepted, fid))
-        conn.execute(
-            "INSERT INTO audit (content_id, actor, action, detail)"
-            " VALUES (?,?,?,?)",
-            (row["content_id"], user["email"], "finding_update",
-             f"finding {fid} -> {body.accepted}"))
+        db.log_audit(conn, row["content_id"], user["email"],
+                     "finding_update", f"finding {fid} -> {body.accepted}")
         conn.commit()
         return db.one(conn, "SELECT * FROM finding WHERE id=?", (fid,))
 
@@ -271,6 +270,10 @@ def approve(cid: int, user: dict = Depends(require_role("manager"))):
         row = db.one(conn, "SELECT * FROM content WHERE id=?", (cid,))
         if not row:
             raise HTTPException(404, "content not found")
+        if row["status"] not in ("review", "peer_review"):
+            raise HTTPException(
+                409, f"approval only from 'review'/'peer_review' "
+                     f"(now '{row['status']}')")
         crit = db.one(conn, "SELECT COUNT(*) n FROM finding WHERE content_id=?"
                       " AND severity='critical' AND accepted=0",
                       (cid,))["n"]
@@ -280,9 +283,9 @@ def approve(cid: int, user: dict = Depends(require_role("manager"))):
                      "dismiss them before approving")
         conn.execute("UPDATE content SET status='approved' WHERE id=?",
                      (cid,))
-        conn.execute(
-            "INSERT INTO audit (content_id, actor, action, detail)"
-            " VALUES (?,?,?,?)", (cid, actor, "approve", "approved"))
+        from .workflow import _snapshot
+        _snapshot(conn, cid, actor)
+        db.log_audit(conn, cid, actor, "approve", "approved")
         conn.commit()
         return db.one(conn, "SELECT * FROM content WHERE id=?", (cid,))
 
@@ -296,9 +299,9 @@ def request_changes(cid: int,
             raise HTTPException(404, "content not found")
         conn.execute("UPDATE content SET status='changes' WHERE id=?",
                      (cid,))
-        conn.execute(
-            "INSERT INTO audit (content_id, actor, action, detail)"
-            " VALUES (?,?,?,?)", (cid, actor, "request_changes", ""))
+        from .workflow import _snapshot
+        _snapshot(conn, cid, actor)
+        db.log_audit(conn, cid, actor, "request_changes", "")
         conn.commit()
         return db.one(conn, "SELECT * FROM content WHERE id=?", (cid,))
 
