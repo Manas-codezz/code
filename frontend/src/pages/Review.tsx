@@ -1,8 +1,25 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, msg, type Content, type Finding, type ReviewResult } from '../api'
 import {
   Badge, Btn, Empty, Field, SeverityBadge, StatusChip, inputCls,
 } from '../ui'
+import {
+  AlertCircle,
+  ArrowDown,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  Clock,
+  Cpu,
+  FileText,
+  History,
+  MessageSquare,
+  Plus,
+  RotateCcw,
+  Send,
+  Sparkles,
+  X,
+} from 'lucide-react'
 
 interface Comment {
   id: number; content_id: number; author: string; body: string
@@ -32,6 +49,7 @@ export default function Review({ selected }: { selected: string }) {
     { title: '', text: '', channel: 'web', type: 'text' })
   const [comment, setComment] = useState('')
 
+  const workspaceRef = useRef<HTMLDivElement>(null)
   const cid = Number(selected) || 0
 
   const loadList = useCallback(() => {
@@ -41,7 +59,7 @@ export default function Review({ selected }: { selected: string }) {
   const loadDetail = useCallback((id: number) => {
     if (!id) { setDetail(null); setResult(null); return }
     api<Content>(`/content/${id}`).then((d) => {
-      setDetail(d)               // findings come stamped from the server
+      setDetail(d)
     }).catch((e) => setErr(msg(e)))
     api<Comment[]>(`/content/${id}/comments`).then(setComments)
       .catch(() => setComments([]))
@@ -57,7 +75,7 @@ export default function Review({ selected }: { selected: string }) {
 
   useEffect(loadList, [loadList])
   useEffect(() => {
-    setResult(null)               // new selection: drop last run's meta
+    setResult(null)
     loadDetail(cid)
   }, [cid, loadDetail])
 
@@ -87,7 +105,7 @@ export default function Review({ selected }: { selected: string }) {
       const r = await api<ReviewResult>(
         `/content/${cid}/review?force_mock=false`, { method: 'POST' })
       setResult(r)
-      loadDetail(cid)              // sync status/SLA side effects
+      loadDetail(cid)
       loadList()
     } catch (e) { setErr(msg(e)) } finally { setBusy('') }
   }
@@ -132,389 +150,589 @@ export default function Review({ selected }: { selected: string }) {
     ? list.filter((c) => c.status === filter) : list
 
   return (
-    <div className="flex gap-5 items-start">
-      {/* ---- list pane ---- */}
-      <div className="w-72 shrink-0 space-y-3 sticky top-4">
-        <div className="flex items-center justify-between">
-          <h1 className="text-xl font-semibold tracking-tight">Review queue</h1>
-          <Btn kind="primary" onClick={() => setShowCreate((s) => !s)}>
-            {showCreate ? 'Cancel' : '+ New'}
-          </Btn>
+    <div className="space-y-8 w-full">
+      {/* =========================================================================
+          SECTION 1: FULL-PAGE REVIEW QUEUE (Top Table View)
+      ========================================================================= */}
+      <section className="bg-white/[0.03] border border-white/10 rounded-2xl backdrop-blur-xl shadow-xl overflow-hidden">
+        {/* Queue Header & Filters */}
+        <div className="p-6 border-b border-white/10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-3">
+              <h1 className="text-xl font-bold tracking-tight text-white">Review Queue</h1>
+              <span className="text-xs px-2.5 py-0.5 rounded-full bg-white/5 border border-white/10 text-zinc-400 font-mono">
+                {list.length} Total Drafts
+              </span>
+            </div>
+            <p className="text-xs text-zinc-400 mt-1">
+              Select any copy draft from the queue to inspect compliance findings and run AI evaluations below.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3 flex-wrap">
+            {/* Filter Pills */}
+            <div className="flex gap-1 bg-white/[0.02] border border-white/10 p-1 rounded-xl">
+              {['', 'draft', 'review', 'changes', 'approved'].map((s) => (
+                <button
+                  key={s || 'all'}
+                  onClick={() => setFilter(s)}
+                  className={`text-[11px] px-3 py-1 rounded-lg uppercase tracking-wider font-semibold transition-all duration-200 cursor-pointer ${
+                    filter === s
+                      ? 'bg-orange-500/20 text-orange-400 font-bold border border-orange-500/40 shadow-[0_0_10px_rgba(249,115,22,0.15)]'
+                      : 'text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  {s || 'all'}
+                </button>
+              ))}
+            </div>
+
+            <Btn kind="primary" onClick={() => setShowCreate((s) => !s)}>
+              <span className="flex items-center gap-1.5">
+                {showCreate ? <X className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+                <span>{showCreate ? 'Close Form' : 'New Draft'}</span>
+              </span>
+            </Btn>
+          </div>
         </div>
 
+        {/* Expandable New Draft Form */}
         {showCreate && (
-          <div className="border border-hairline bg-surface p-3 rounded-sm
-            space-y-2.5">
-            <Field label="Title">
-              <input className={inputCls} value={draft.title}
-                     onChange={(e) =>
-                       setDraft({ ...draft, title: e.target.value })}
-                     placeholder="Q4 launch email" />
-            </Field>
-            <Field label="Text">
-              <textarea className={`${inputCls} h-24 resize-none`}
-                        value={draft.text}
-                        onChange={(e) =>
-                          setDraft({ ...draft, text: e.target.value })}
-                        placeholder="Paste copy to review…" />
-            </Field>
-            <div className="grid grid-cols-2 gap-2">
-              <Field label="Type">
-                <select className={inputCls} value={draft.type}
-                        onChange={(e) =>
-                          setDraft({ ...draft, type: e.target.value })}>
-                  <option value="text">text</option>
-                  <option value="image">image</option>
-                  <option value="email">email</option>
-                  <option value="social">social</option>
-                </select>
-              </Field>
-              <Field label="Channel">
-                <input className={inputCls} value={draft.channel}
-                       onChange={(e) =>
-                         setDraft({ ...draft, channel: e.target.value })} />
-              </Field>
+          <div className="p-6 border-b border-white/10 bg-white/[0.02] space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-white">
+                Submit New Copy for Compliance Evaluation
+              </h3>
+              <span className="text-xs text-zinc-500">Auto-routes to reviewer queue</span>
             </div>
-            <Btn kind="primary" onClick={create}
-                 disabled={busy === 'create' || !draft.title || !draft.text}
-                 className="w-full">
-              {busy === 'create' ? 'Creating…' : 'Create & open'}
-            </Btn>
+            <div className="grid md:grid-cols-2 gap-4">
+              <Field label="Draft Title">
+                <input
+                  className={inputCls}
+                  value={draft.title}
+                  onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+                  placeholder="e.g. Q4 Global Brand Campaign Headline"
+                />
+              </Field>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Channel">
+                  <input
+                    className={inputCls}
+                    value={draft.channel}
+                    onChange={(e) => setDraft({ ...draft, channel: e.target.value })}
+                    placeholder="e.g. web, email, social"
+                  />
+                </Field>
+                <Field label="Type">
+                  <div className="relative">
+                    <select
+                      className="w-full border border-white/10 bg-[#0f1117] text-zinc-100 px-3.5 py-2 text-sm rounded-lg focus:border-orange-500/80 focus:ring-1 focus:ring-orange-500/40 focus:outline-none transition-all cursor-pointer appearance-none pr-9"
+                      style={{ backgroundColor: '#0f1117', color: '#f4f4f5' }}
+                      value={draft.type}
+                      onChange={(e) => setDraft({ ...draft, type: e.target.value })}
+                    >
+                      <option value="text" className="bg-[#0f1117] text-white" style={{ backgroundColor: '#0f1117', color: '#ffffff' }}>text</option>
+                      <option value="image" className="bg-[#0f1117] text-white" style={{ backgroundColor: '#0f1117', color: '#ffffff' }}>image</option>
+                      <option value="email" className="bg-[#0f1117] text-white" style={{ backgroundColor: '#0f1117', color: '#ffffff' }}>email</option>
+                      <option value="social" className="bg-[#0f1117] text-white" style={{ backgroundColor: '#0f1117', color: '#ffffff' }}>social</option>
+                    </select>
+                    <ChevronDown className="w-4 h-4 text-zinc-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  </div>
+                </Field>
+              </div>
+              <div className="md:col-span-2">
+                <Field label="Copy Content Body">
+                  <textarea
+                    className={`${inputCls} h-24 resize-none`}
+                    value={draft.text}
+                    onChange={(e) => setDraft({ ...draft, text: e.target.value })}
+                    placeholder="Paste the marketing copy, claims, or disclaimers to evaluate…"
+                  />
+                </Field>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 pt-2">
+              <Btn onClick={() => setShowCreate(false)}>Cancel</Btn>
+              <Btn
+                kind="primary"
+                onClick={create}
+                disabled={busy === 'create' || !draft.title || !draft.text}
+              >
+                {busy === 'create' ? 'Creating…' : 'Create & Open Review Below'}
+              </Btn>
+            </div>
           </div>
         )}
 
-        <div className="flex gap-1 flex-nowrap overflow-x-auto pb-0.5">
-          {['', 'draft', 'review', 'changes', 'approved'].map((s) => (
-            <button key={s || 'all'} onClick={() => setFilter(s)}
-                    className={`text-[10.5px] px-2 py-1 border rounded-sm
-                      uppercase tracking-wider font-semibold transition-colors
-                      whitespace-nowrap shrink-0
-                      ${filter === s
-                        ? 'border-ink bg-ink text-paper'
-                        : 'border-hairline text-ink2 hover:border-ink'}`}>
-              {s || 'all'}
-            </button>
-          ))}
+        {/* Full-Width Queue Table */}
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs text-left">
+            <thead>
+              <tr className="border-b border-white/10 text-zinc-400 uppercase tracking-wider text-[11px] bg-white/[0.01]">
+                <th className="py-3 px-6 font-semibold">Title & Excerpt</th>
+                <th className="py-3 px-4 font-semibold">Channel / Type</th>
+                <th className="py-3 px-4 font-semibold">Author & Team</th>
+                <th className="py-3 px-4 font-semibold">SLA Deadline</th>
+                <th className="py-3 px-4 font-semibold">Status</th>
+                <th className="py-3 px-6 text-right font-semibold">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/5">
+              {visible.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="py-12 text-center text-zinc-500">
+                    No drafts currently match the filter criteria.
+                  </td>
+                </tr>
+              )}
+              {visible.map((c) => {
+                const isSelected = cid === c.id
+                return (
+                  <tr
+                    key={c.id}
+                    onClick={() => {
+                      location.hash = `#/review/${c.id}`
+                      setTimeout(() => {
+                        workspaceRef.current?.scrollIntoView({ behavior: 'smooth' })
+                      }, 100)
+                    }}
+                    className={`transition-all duration-200 cursor-pointer ${
+                      isSelected
+                        ? 'bg-orange-500/[0.08] shadow-[inset_0_0_0_1px_rgba(249,115,22,0.35)]'
+                        : 'hover:bg-white/[0.02]'
+                    }`}
+                  >
+                    <td className="py-4 px-6 max-w-xs sm:max-w-md">
+                      <div className="font-semibold text-white text-sm truncate flex items-center gap-2">
+                        <span>{c.title}</span>
+                        {isSelected && (
+                          <span className="text-[10px] text-orange-400 bg-orange-500/10 px-2 py-0.5 rounded border border-orange-500/20 font-mono">
+                            Active
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-zinc-400 text-xs truncate mt-0.5 font-sans">
+                        {c.text || '(No text body — image asset)'}
+                      </div>
+                    </td>
+                    <td className="py-4 px-4 whitespace-nowrap">
+                      <Badge className="bg-white/[0.04] text-zinc-300 border-white/10">
+                        {c.channel} · {c.type}
+                      </Badge>
+                    </td>
+                    <td className="py-4 px-4 whitespace-nowrap text-zinc-300">
+                      <div>{c.created_by}</div>
+                      <div className="text-[11px] text-zinc-500">team {c.team}</div>
+                    </td>
+                    <td className="py-4 px-4 whitespace-nowrap">
+                      {c.sla_due_at ? (
+                        <div className="flex items-center gap-1.5 text-zinc-300">
+                          <Clock className={`w-3.5 h-3.5 ${c.status === 'review' ? 'text-amber-400' : 'text-zinc-500'}`} />
+                          <span>
+                            {new Date(c.sla_due_at + 'Z').toLocaleString(undefined, {
+                              month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                            })}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-zinc-600">—</span>
+                      )}
+                    </td>
+                    <td className="py-4 px-4 whitespace-nowrap">
+                      <StatusChip status={c.status} />
+                    </td>
+                    <td className="py-4 px-6 text-right whitespace-nowrap">
+                      <span className="inline-flex items-center gap-1 text-xs text-orange-400 group-hover:text-orange-300 font-medium">
+                        <span>{isSelected ? 'Viewing' : 'Inspect'}</span>
+                        <ArrowDown className="w-3.5 h-3.5" />
+                      </span>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         </div>
+      </section>
 
-        <div className="border border-hairline bg-surface rounded-sm
-          divide-y divide-hairline max-h-[70vh] overflow-y-auto">
-          {visible.length === 0 && (
-            <div className="p-4 text-[13px] text-ink2">Nothing here.</div>
-          )}
-          {visible.map((c) => (
-            <a key={c.id} href={`#/review/${c.id}`}
-               className={`block px-3 py-2.5 transition-colors
-                 ${cid === c.id ? 'bg-orange-50/50 border-l-2 border-accent'
-                                : 'hover:bg-paper border-l-2 border-transparent'}`}>
-              <div className="flex items-center gap-2 justify-between">
-                <span className="text-[13px] font-medium truncate">
-                  {c.title}
-                </span>
-                <StatusChip status={c.status} />
-              </div>
-              <div className="text-[11px] text-ink2 mt-1 truncate">
-                {c.created_by} · {c.channel}
-                {c.sla_due_at && c.status === 'review' && (
-                  <span className="text-warning"> · SLA</span>
-                )}
-              </div>
-            </a>
-          ))}
-        </div>
-      </div>
-
-      {/* ---- detail pane ---- */}
-      <div className="flex-1 min-w-0">
-        {!cid && (
-          <Empty>Select content on the left, or create something new.</Empty>
-        )}
-
-        {cid > 0 && detail && (
-          <div className="space-y-4">
-            {err && (
-              <div className="text-[13px] text-critical border
-                border-critical/30 bg-red-50 px-3 py-2 rounded-sm">
-                {err}
-              </div>
-            )}
-
-            <header className="border border-hairline bg-surface rounded-sm
-              px-4 py-3.5">
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2.5 flex-wrap">
-                    <h2 className="text-lg font-semibold tracking-tight
-                      truncate">
+      {/* =========================================================================
+          SECTION 2: FULL-PAGE EVALUATION WORKSPACE (Bottom Detailed View)
+      ========================================================================= */}
+      <div ref={workspaceRef} className="space-y-6">
+        {!cid ? (
+          <div className="bg-white/[0.02] border border-white/10 rounded-2xl p-12 text-center backdrop-blur-xl">
+            <FileText className="w-10 h-10 text-zinc-600 mx-auto mb-3" />
+            <h3 className="text-base font-semibold text-white">No Draft Selected</h3>
+            <p className="text-xs text-zinc-400 max-w-md mx-auto mt-1">
+              Click any draft row in the queue above to open the full compliance evaluation workspace, run AI audits, and view generated findings.
+            </p>
+          </div>
+        ) : detail ? (
+          <div className="space-y-6">
+            {/* Active Draft Action Bar */}
+            <div className="bg-white/[0.03] border border-white/10 rounded-2xl p-6 backdrop-blur-xl shadow-xl">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <span className="text-[11px] font-mono text-orange-400 uppercase tracking-wider bg-orange-500/10 px-2 py-0.5 rounded border border-orange-500/20">
+                      ACTIVE WORKSPACE
+                    </span>
+                    <h2 className="text-xl font-bold tracking-tight text-white">
                       {detail.title}
                     </h2>
                     <StatusChip status={detail.status} />
-                    <Badge className="text-ink2 border-hairline">
-                      {detail.type}
-                      {detail.channel !== detail.type
-                        && ` · ${detail.channel}`}
+                    <Badge className="bg-white/[0.04] text-zinc-300 border-white/10">
+                      {detail.channel} · {detail.type}
                     </Badge>
                   </div>
-                  <div className="text-[12px] text-ink2 mt-1">
-                    by {detail.created_by} · team {detail.team}
+                  <div className="text-xs text-zinc-400 mt-1.5 flex items-center gap-3">
+                    <span>Author: <strong className="text-zinc-200">{detail.created_by}</strong></span>
+                    <span>·</span>
+                    <span>Team: <strong className="text-zinc-200">{detail.team}</strong></span>
                     {detail.sla_due_at && (
-                      <> · SLA due <span className="tabular">
-                        {new Date(detail.sla_due_at + 'Z')
-                          .toLocaleString(undefined, {
-                            month: 'short', day: 'numeric',
-                            hour: '2-digit', minute: '2-digit' })}
-                      </span></>
+                      <>
+                        <span>·</span>
+                        <span className="text-amber-400 flex items-center gap-1 font-medium">
+                          <Clock className="w-3.5 h-3.5" /> SLA Due: {new Date(detail.sla_due_at + 'Z').toLocaleString(undefined, {
+                            month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                          })}
+                        </span>
+                      </>
                     )}
                   </div>
                 </div>
-                <div className="flex gap-2 shrink-0">
+
+                {/* Primary Action Buttons */}
+                <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
                   <Btn onClick={runReview} disabled={busy === 'review'}>
-                    {busy === 'review' ? 'Reviewing…'
-                      : result ? 'Re-run review' : 'Run AI review'}
+                    <span className="flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-orange-400" />
+                      <span>{busy === 'review' ? 'Evaluating…' : result ? 'Re-run Evaluation' : 'Run AI Evaluation'}</span>
+                    </span>
                   </Btn>
-                  <Btn kind="primary" onClick={approve}
-                       disabled={busy === 'approve'
-                                || detail.status === 'approved'
-                                || unresolvedCriticals.length > 0}
-                       title={unresolvedCriticals.length
-                         ? `${unresolvedCriticals.length} critical finding(s)
-                            must be accepted or dismissed first`
-                         : ''}>
-                    {busy === 'approve' ? 'Approving…' : 'Approve'}
+                  <Btn
+                    kind="primary"
+                    onClick={approve}
+                    disabled={
+                      busy === 'approve' ||
+                      detail.status === 'approved' ||
+                      unresolvedCriticals.length > 0
+                    }
+                    title={
+                      unresolvedCriticals.length
+                        ? `${unresolvedCriticals.length} critical finding(s) must be accepted or dismissed first`
+                        : ''
+                    }
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <Check className="w-3.5 h-3.5" />
+                      <span>{busy === 'approve' ? 'Approving…' : 'Approve Draft'}</span>
+                    </span>
                   </Btn>
-                  <Btn kind="danger" onClick={requestChanges}
-                       disabled={busy === 'rc'
-                                || detail.status === 'changes'}>
-                    Request changes
+                  <Btn
+                    kind="danger"
+                    onClick={requestChanges}
+                    disabled={busy === 'rc' || detail.status === 'changes'}
+                  >
+                    Request Changes
                   </Btn>
                 </div>
               </div>
 
+              {/* Approval Gating Banner */}
               {unresolvedCriticals.length > 0 && (
-                <div className="mt-3 text-[12px] text-critical bg-red-50
-                  border border-critical/20 px-3 py-1.5 rounded-sm">
-                  Approval blocked — {unresolvedCriticals.length} critical
-                  finding{unresolvedCriticals.length > 1 ? 's' : ''} still
-                  unresolved (accept or dismiss each to proceed).
+                <div className="mt-4 text-xs text-red-300 bg-red-950/40 border border-red-500/30 px-4 py-3 rounded-xl flex items-center gap-2.5">
+                  <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                  <span>
+                    <strong>Approval Blocked</strong> — {unresolvedCriticals.length} critical finding{unresolvedCriticals.length > 1 ? 's' : ''} require action (accept or dismiss each in the findings deck below) before this draft can ship.
+                  </span>
                 </div>
               )}
+
+              {/* AI Diagnostic Metrics */}
               {result && (
-                <div className="mt-3 text-[12px] text-ink2 flex gap-4
-                  flex-wrap">
-                  <span>provider <strong className="text-ink">
-                    {result.provider}</strong></span>
-                  <span>model <strong className="text-ink">{result.model}</strong></span>
-                  <span className="tabular">{result.latency_ms}ms</span>
-                  <span className="tabular">{result.tokens} tokens</span>
-                  <span>{result.findings.length} findings</span>
+                <div className="mt-4 pt-4 border-t border-white/5 flex items-center gap-6 text-xs text-zinc-400 flex-wrap">
+                  <span className="flex items-center gap-1.5">
+                    <Cpu className="w-3.5 h-3.5 text-orange-400" />
+                    Provider: <strong className="text-white">{result.provider}</strong>
+                  </span>
+                  <span>Model: <strong className="text-white">{result.model}</strong></span>
+                  <span className="tabular-nums">Latency: <strong className="text-white">{result.latency_ms}ms</strong></span>
+                  <span className="tabular-nums">Tokens: <strong className="text-white">{result.tokens}</strong></span>
+                  <span>Findings Identified: <strong className="text-white">{result.findings.length}</strong></span>
                 </div>
               )}
-            </header>
+            </div>
 
-            {/* content text */}
-            <section className="border border-hairline bg-surface rounded-sm">
-              <header className="px-4 py-2.5 border-b border-hairline
-                flex justify-between items-center">
-                <h3 className="eyebrow">Content under review</h3>
-              </header>
-              <pre className="px-4 py-3.5 text-[13px] leading-relaxed
-                whitespace-pre-wrap font-sans text-ink">
-                {detail.text || <span className="text-ink2">
-                  (no text — image asset)</span>}
-              </pre>
-              {detail.image_path && (
-                <div className="px-4 pb-4">
-                  <img src={detail.image_path} alt=""
-                       className="max-h-56 border border-hairline rounded-sm" />
-                </div>
-              )}
-            </section>
+            {/* Error Toast */}
+            {err && (
+              <div className="text-xs text-red-300 border border-red-500/30 bg-red-950/40 px-4 py-3 rounded-xl flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                <span>{err}</span>
+              </div>
+            )}
 
-            {/* findings */}
-            <section className="border border-hairline bg-surface rounded-sm">
-              <header className="px-4 py-2.5 border-b border-hairline
-                flex justify-between items-center">
-                <h3 className="eyebrow">Findings</h3>
-                <span className="text-[11px] text-ink2">
-                  {findings.length === 0
-                    ? 'run the review to generate'
-                    : `${findings.filter((f) => f.accepted === 1).length} accepted ·
-                       ${findings.filter((f) => f.accepted === 2).length} dismissed`}
-                </span>
-              </header>
-
-              {findings.length === 0 && (
-                <div className="p-4">
-                  <Empty>
-                    No findings yet — run the AI review. Deterministic checks
-                    (glossary, WCAG, disclaimers) always run alongside the LLM.
-                  </Empty>
-                </div>
-              )}
-
-              <ul className="divide-y divide-hairline">
-                {findings.map((f) => (
-                  <li key={f.id}
-                      className={`px-4 py-3.5 ${
-                        f.accepted === 2 ? 'opacity-50' : ''}`}>
-                    <div className="flex items-start gap-3">
-                      <SeverityBadge severity={f.severity} />
-                      <div className="flex-1 min-w-0">
-                        <div className="text-[13.5px] font-medium">
-                          {f.rule}
-                        </div>
-                        {f.excerpt && (
-                          <code className="font-mono text-[12px] bg-paper
-                            border border-hairline px-1.5 py-0.5 rounded-sm
-                            mt-1.5 inline-block break-all">
-                            {f.excerpt}
-                          </code>
-                        )}
-                        <div className="text-[13px] text-ink mt-1.5">
-                          {f.suggestion}
-                        </div>
-                        <div className="text-[11.5px] text-ink2 mt-1.5
-                          flex gap-3 flex-wrap">
-                          <span>⚑ {f.category}</span>
-                          <span>confidence
-                            {' '}{Math.round(f.confidence * 100)}%</span>
-                          <span className="truncate max-w-md"
-                                title={f.evidence}>
-                            evidence: {f.evidence || '—'}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="flex gap-1.5 shrink-0">
-                        {f.accepted !== 1 && (
-                          <Btn onClick={() => setFinding(f, 1)}
-                               className="!py-1 !px-2 !text-[12px]">
-                            Accept
-                          </Btn>
-                        )}
-                        {f.accepted !== 2 && (
-                          <Btn kind="danger"
-                               onClick={() => setFinding(f, 2)}
-                               className="!py-1 !px-2 !text-[12px]">
-                            Dismiss
-                          </Btn>
-                        )}
-                        {f.accepted !== 0 && (
-                          <Btn onClick={() => setFinding(f, 0)}
-                               className="!py-1 !px-2 !text-[12px]">
-                            Undo
-                          </Btn>
-                        )}
-                      </div>
+            {/* Workspace Grid: Draft Content (Left) & Generated Summary / Findings (Right) */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+              {/* Left Column: Draft Content & Revisions Diff */}
+              <div className="lg:col-span-5 space-y-6">
+                {/* Content Under Review */}
+                <section className="bg-white/[0.03] border border-white/10 rounded-2xl overflow-hidden backdrop-blur-xl shadow-lg">
+                  <header className="px-5 py-3.5 border-b border-white/10 flex items-center justify-between bg-white/[0.01]">
+                    <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-300">
+                      Content Under Review
+                    </h3>
+                    <span className="text-[11px] text-zinc-500 font-mono">
+                      {detail.text.length} chars
+                    </span>
+                  </header>
+                  <pre className="p-5 text-sm leading-relaxed whitespace-pre-wrap font-sans text-zinc-100 bg-[#06070a]/70">
+                    {detail.text || <span className="text-zinc-500 italic">(Empty text content — visual asset draft)</span>}
+                  </pre>
+                  {detail.image_path && (
+                    <div className="p-5 border-t border-white/5">
+                      <img
+                        src={detail.image_path}
+                        alt=""
+                        className="max-h-60 rounded-xl border border-white/10"
+                      />
                     </div>
-                    {f.accepted === 1 && (
-                      <div className="text-[11px] text-ok mt-1.5 pl-1">
-                        ✓ accepted — counts toward approval
-                      </div>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </section>
+                  )}
+                </section>
 
-            {/* peer review comments */}
-            <section className="border border-hairline bg-surface rounded-sm">
-              <header className="px-4 py-2.5 border-b border-hairline">
-                <h3 className="eyebrow">Peer review thread</h3>
-              </header>
-              <div className="p-4 space-y-3">
-                {comments.length === 0 && (
-                  <p className="text-[13px] text-ink2">No comments yet.</p>
-                )}
-                {comments.map((c) => (
-                  <div key={c.id}
-                       className={`text-[13px] ${c.resolved
-                         ? 'opacity-50' : ''}`}>
-                    <div className="flex gap-2 items-baseline">
-                      <strong className="text-[12.5px]">{c.author}</strong>
-                      <span className="text-[11px] text-ink2">
-                        {new Date(c.created_at + 'Z')
-                          .toLocaleDateString(undefined,
-                            { month: 'short', day: 'numeric' })}
+                {/* Revision Timeline & Diff */}
+                {versions.length > 0 && (
+                  <section className="bg-white/[0.03] border border-white/10 rounded-2xl overflow-hidden backdrop-blur-xl shadow-lg">
+                    <header className="px-5 py-3.5 border-b border-white/10 flex justify-between items-center bg-white/[0.01]">
+                      <div className="flex items-center gap-2">
+                        <History className="w-3.5 h-3.5 text-zinc-400" />
+                        <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-300">
+                          Revisions Timeline
+                        </h3>
+                      </div>
+                      <span className="text-xs text-zinc-500">
+                        {versions.length} version{versions.length > 1 ? 's' : ''}
                       </span>
-                      {!c.resolved ? (
-                        <button className="text-[11px] text-accent
-                          hover:underline ml-auto"
-                          onClick={async () => {
-                            await api(`/comments/${c.id}`, {
-                              method: 'PATCH',
-                              body: { resolved: true } })
-                            setComments(await api<Comment[]>(
-                              `/content/${cid}/comments`))
-                          }}>
-                          resolve
-                        </button>
-                      ) : (
-                        <span className="text-[11px] text-ok ml-auto">
-                          resolved
-                        </span>
+                    </header>
+                    <div className="p-5 space-y-3">
+                      <div className="flex gap-2 flex-wrap text-xs">
+                        {versions.map((v) => (
+                          <Badge
+                            key={v.version}
+                            className="bg-white/[0.04] text-zinc-300 border-white/10"
+                          >
+                            v{v.version} · {v.status}
+                          </Badge>
+                        ))}
+                      </div>
+
+                      {diff && (
+                        <details className="mt-3 group" open={diff.added + diff.removed > 0}>
+                          <summary className="text-xs font-semibold uppercase tracking-wider text-orange-400 cursor-pointer hover:text-orange-300 flex items-center gap-2 select-none">
+                            <span>Revisions Diff (+{diff.added} / −{diff.removed})</span>
+                          </summary>
+                          <pre className="mt-2.5 font-mono text-xs bg-[#06070a]/90 border border-white/10 rounded-xl p-4 overflow-x-auto leading-relaxed">
+                            {diff.lines.map((l, i) => (
+                              <div
+                                key={i}
+                                className={
+                                  l.startsWith('+')
+                                    ? 'text-emerald-400 bg-emerald-500/10 px-1 rounded'
+                                    : l.startsWith('-')
+                                    ? 'text-red-400 bg-red-500/10 px-1 rounded'
+                                    : 'text-zinc-500'
+                                }
+                              >
+                                {l}
+                              </div>
+                            ))}
+                          </pre>
+                        </details>
                       )}
                     </div>
-                    <div className="mt-0.5">{c.body}</div>
-                  </div>
-                ))}
-                <div className="flex gap-2 pt-1">
-                  <input className={inputCls} value={comment}
-                         placeholder="Add a review note…"
-                         onChange={(e) => setComment(e.target.value)}
-                         onKeyDown={(e) =>
-                           e.key === 'Enter' && postComment()} />
-                  <Btn onClick={postComment}
-                       disabled={busy === 'c' || !comment.trim()}>
-                    Post
-                  </Btn>
-                </div>
+                  </section>
+                )}
               </div>
-            </section>
 
-            {/* version history + diff */}
-            {versions.length > 0 && (
-              <section className="border border-hairline bg-surface
-                rounded-sm">
-                <header className="px-4 py-2.5 border-b border-hairline
-                  flex justify-between">
-                  <h3 className="eyebrow">Version history</h3>
-                  <span className="text-[11px] text-ink2">
-                    {versions.length} version{versions.length > 1 ? 's' : ''}
-                  </span>
-                </header>
-                <div className="px-4 py-3">
-                  <div className="flex gap-2 flex-wrap text-[12px]">
-                    {versions.map((v) => (
-                      <Badge key={v.version}
-                             className="text-ink2 border-hairline">
-                        v{v.version} · {v.status}
-                      </Badge>
-                    ))}
-                  </div>
-                  {diff && (
-                    <details className="mt-3" open={diff.added + diff.removed > 0}>
-                      <summary className="eyebrow cursor-pointer">
-                        latest diff (+{diff.added} / −{diff.removed})
-                      </summary>
-                      <pre className="mt-2 font-mono text-[11.5px]
-                        bg-paper border border-hairline rounded-sm p-3
-                        overflow-x-auto leading-relaxed">
-                        {diff.lines.map((l, i) => (
-                          <div key={i} className={
-                            l.startsWith('+') ? 'text-ok'
-                            : l.startsWith('-') ? 'text-critical'
-                            : 'text-ink2'}>
-                            {l}
-                          </div>
-                        ))}
-                      </pre>
-                    </details>
+              {/* Right Column: Generated Findings Deck & Reviewer Thread */}
+              <div className="lg:col-span-7 space-y-6">
+                {/* Findings Deck (Generated Evaluation Summary) */}
+                <section className="bg-white/[0.03] border border-white/10 rounded-2xl overflow-hidden backdrop-blur-xl shadow-lg">
+                  <header className="px-5 py-3.5 border-b border-white/10 flex justify-between items-center bg-white/[0.01]">
+                    <div className="flex items-center gap-2.5">
+                      <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-300">
+                        Generated Evaluation Summary & Findings
+                      </h3>
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-white/5 text-zinc-400 border border-white/10 font-mono">
+                        {findings.length}
+                      </span>
+                    </div>
+                    <span className="text-xs text-zinc-400">
+                      {findings.filter((f) => f.accepted === 1).length} accepted · {findings.filter((f) => f.accepted === 2).length} dismissed
+                    </span>
+                  </header>
+
+                  {findings.length === 0 && (
+                    <div className="p-8">
+                      <Empty>
+                        <p className="text-zinc-300 font-medium">No findings recorded yet.</p>
+                        <p className="text-xs text-zinc-500 mt-1">
+                          Click "Run AI Evaluation" above to audit copy against brand guidelines, prohibited terminology, and facts.
+                        </p>
+                      </Empty>
+                    </div>
                   )}
-                </div>
-              </section>
-            )}
+
+                  <ul className="divide-y divide-white/5">
+                    {findings.map((f) => (
+                      <li
+                        key={f.id}
+                        className={`p-5 transition-opacity ${f.accepted === 2 ? 'opacity-40' : ''}`}
+                      >
+                        <div className="flex flex-col sm:flex-row items-start gap-4">
+                          <SeverityBadge severity={f.severity} />
+                          <div className="flex-1 min-w-0 space-y-2">
+                            <div className="text-sm font-semibold text-white">
+                              {f.rule}
+                            </div>
+                            {f.excerpt && (
+                              <code className="font-mono text-xs bg-white/[0.05] border border-white/10 text-orange-300 px-2.5 py-1 rounded-md inline-block break-all">
+                                "{f.excerpt}"
+                              </code>
+                            )}
+                            <div className="text-xs text-zinc-300 leading-relaxed">
+                              {f.suggestion}
+                            </div>
+                            <div className="text-[11px] text-zinc-500 flex gap-3 flex-wrap pt-1">
+                              <span className="capitalize">Category: {f.category}</span>
+                              <span>·</span>
+                              <span>Confidence: {Math.round(f.confidence * 100)}%</span>
+                              <span>·</span>
+                              <span className="truncate max-w-md" title={f.evidence}>
+                                Evidence: {f.evidence || '—'}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Action Buttons */}
+                          <div className="flex gap-2 shrink-0 self-end sm:self-start">
+                            {f.accepted !== 1 && (
+                              <Btn
+                                kind="ghost"
+                                onClick={() => setFinding(f, 1)}
+                                className="!py-1 !px-2.5 !text-xs !border-emerald-500/30 hover:!bg-emerald-500/10 text-emerald-400"
+                              >
+                                <Check className="w-3.5 h-3.5 inline mr-1" />
+                                Accept
+                              </Btn>
+                            )}
+                            {f.accepted !== 2 && (
+                              <Btn
+                                kind="danger"
+                                onClick={() => setFinding(f, 2)}
+                                className="!py-1 !px-2.5 !text-xs"
+                              >
+                                <X className="w-3.5 h-3.5 inline mr-1" />
+                                Dismiss
+                              </Btn>
+                            )}
+                            {f.accepted !== 0 && (
+                              <Btn
+                                onClick={() => setFinding(f, 0)}
+                                className="!py-1 !px-2.5 !text-xs"
+                              >
+                                <RotateCcw className="w-3.5 h-3.5 inline mr-1" />
+                                Undo
+                              </Btn>
+                            )}
+                          </div>
+                        </div>
+                        {f.accepted === 1 && (
+                          <div className="text-xs text-emerald-400 mt-2.5 flex items-center gap-1.5 font-medium">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>Accepted — counts towards compliance threshold.</span>
+                          </div>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+
+                {/* Peer Review Notes & Comment Thread */}
+                <section className="bg-white/[0.03] border border-white/10 rounded-2xl overflow-hidden backdrop-blur-xl shadow-lg">
+                  <header className="px-5 py-3.5 border-b border-white/10 flex items-center justify-between bg-white/[0.01]">
+                    <div className="flex items-center gap-2">
+                      <MessageSquare className="w-3.5 h-3.5 text-zinc-400" />
+                      <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-300">
+                        Peer Reviewer Thread
+                      </h3>
+                    </div>
+                    <span className="text-xs text-zinc-500">{comments.length} notes</span>
+                  </header>
+                  <div className="p-5 space-y-4">
+                    {comments.length === 0 && (
+                      <p className="text-xs text-zinc-500">No reviewer notes posted yet on this draft.</p>
+                    )}
+                    {comments.map((c) => (
+                      <div
+                        key={c.id}
+                        className={`p-3.5 rounded-xl bg-white/[0.02] border border-white/5 text-xs ${
+                          c.resolved ? 'opacity-40' : ''
+                        }`}
+                      >
+                        <div className="flex gap-2 items-center justify-between mb-1">
+                          <div className="flex items-center gap-2">
+                            <strong className="text-zinc-200">{c.author}</strong>
+                            <span className="text-[11px] text-zinc-500">
+                              {new Date(c.created_at + 'Z').toLocaleDateString(undefined, {
+                                month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                              })}
+                            </span>
+                          </div>
+                          {!c.resolved ? (
+                            <button
+                              className="text-[11px] text-orange-400 hover:text-orange-300 transition-colors cursor-pointer"
+                              onClick={async () => {
+                                await api(`/comments/${c.id}`, {
+                                  method: 'PATCH', body: { resolved: true },
+                                })
+                                setComments(await api<Comment[]>(`/content/${cid}/comments`))
+                              }}
+                            >
+                              Mark resolved
+                            </button>
+                          ) : (
+                            <span className="text-[11px] text-emerald-400 flex items-center gap-1">
+                              <Check className="w-3 h-3" /> Resolved
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-zinc-300 leading-relaxed">{c.body}</div>
+                      </div>
+                    ))}
+
+                    {/* New Note Form */}
+                    <div className="flex gap-2.5 pt-2">
+                      <input
+                        className={inputCls}
+                        value={comment}
+                        placeholder="Add a review note or compliance feedback…"
+                        onChange={(e) => setComment(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && postComment()}
+                      />
+                      <Btn onClick={postComment} disabled={busy === 'c' || !comment.trim()}>
+                        <span className="flex items-center gap-1.5">
+                          <Send className="w-3.5 h-3.5" />
+                          <span>Post</span>
+                        </span>
+                      </Btn>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </div>
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   )

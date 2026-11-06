@@ -12,6 +12,8 @@ dependencies = [
     "pillow",
     "python-multipart",
     "python-dotenv",
+    "bcrypt>=5.0.0",
+    "jwtninja>=2.0.0",
 ]
 
 [tool.pytest.ini_options]

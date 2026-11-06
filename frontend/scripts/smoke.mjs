@@ -1,4 +1,4 @@
-/* UI smoke: login → dashboard → review flow → KB, against dev server.
+/* UI smoke: hero landing → login → dashboard → review flow → KB, against dev server.
    Run: node scripts/smoke.mjs   (vite dev on :5173, API on :8001) */
 import { chromium } from 'playwright-core'
 
@@ -17,9 +17,17 @@ const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
 page.on('pageerror', (e) => fails.push(`pageerror: ${e.message}`))
 
 try {
-  // 1. login
+  // 1. hero landing & login
   await page.goto(BASE, { waitUntil: 'networkidle' })
-  ok('login page renders', await page.locator('text=Demo accounts').isVisible())
+  const hasHero = await page.locator('text=BrandGuard').first().isVisible()
+  ok('hero landing page renders first', hasHero)
+  if (await page.locator('button:has-text("Log in")').isVisible()) {
+    await page.locator('button:has-text("Log in")').click()
+  } else if (!page.url().includes('#/login')) {
+    await page.goto(`${BASE}/#/login`, { waitUntil: 'networkidle' })
+  }
+  await page.waitForSelector('text=Demo accounts', { timeout: 8000 })
+  ok('login page renders', true)
   await page.locator('button:has-text("Manager")').click()
   await page.waitForURL(/#\/dashboard/, { timeout: 8000 })
   await page.waitForSelector('h1:has-text("Dashboard")', { timeout: 8000 })
@@ -95,18 +103,16 @@ try {
   const kbRows = await page.locator('code, strong').count()
   ok(`KB rows visible (${kbRows})`, kbRows > 0)
 
-  // 9. logout → back to login
+  // 9. logout → back to landing
   await page.locator('button:has-text("Sign out")').click()
-  await page.waitForSelector('text=Demo accounts', { timeout: 5000 })
-  ok('logout returns to login', true)
-
-  await page.screenshot({ path: 'smoke-final.png', fullPage: true })
-} catch (e) {
-  fails.push(`exception: ${e.message}`)
-  await page.screenshot({ path: 'smoke-fail.png' }).catch(() => {})
+  await page.waitForSelector('text=BrandGuard', { timeout: 5000 })
 } finally {
   await browser.close()
 }
 
-console.log(fails.length ? `\n${fails.length} FAILURES:\n${fails.join('\n')}` : '\nALL PASS')
-process.exit(fails.length ? 1 : 0)
+if (fails.length) {
+  console.error(`\n${fails.length} failures:`, fails)
+  process.exit(1)
+} else {
+  console.log('\nAll smoke checks passed.')
+}
