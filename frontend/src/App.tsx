@@ -6,6 +6,7 @@ import Review from './pages/Review'
 import KB from './pages/KB'
 import { BrandLogo } from './components/ui/BrandLogo'
 import RoleTourGuide from './components/ui/RoleTourGuide'
+import AutoSpotlightTour from './components/ui/AutoSpotlightTour'
 import { Toaster, toast } from 'sonner'
 import {
   ArrowRight, BookOpen, Command, Compass, FileCheck2, LayoutDashboard, LogOut,
@@ -67,6 +68,10 @@ export default function App() {
   const [navOpen, setNavOpen] = useState(false)
   const [cmdOpen, setCmdOpen] = useState(false)
   const [tourOpen, setTourOpen] = useState(false)
+  const [autoTourActive, setAutoTourActive] = useState(() => {
+    // Automatically launch when user lands on hero or app if not previously dismissed
+    return !localStorage.getItem('brandguard_autotour_dismissed')
+  })
   const [q, setQ] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)
 
@@ -82,6 +87,7 @@ export default function App() {
     try {
       const newUser = await login(target.email, target.pw)
       setUser(newUser)
+      setPath(parseHash(true))
       toast.success(`Switched role to ${role.toUpperCase()}`, {
         description: `Now viewing as ${newUser.email} (${newUser.team} team)`
       })
@@ -139,6 +145,12 @@ export default function App() {
     return [
       ...base,
       {
+        id: 'autotour',
+        label: 'Start Guided Spotlight Tour',
+        hint: 'Auto-guided walkthrough with element spotlights',
+        run: () => { setAutoTourActive(true); setCmdOpen(false) },
+      },
+      {
         id: 'tour',
         label: 'Interactive Role Tour',
         hint: 'Start guided 4-role compliance tour',
@@ -164,18 +176,31 @@ export default function App() {
 
   if (path.route === 'hero') {
     return (
-      <Suspense fallback={<div className="min-h-screen bg-canvas" />}>
-        <DotGlobeHeroDemo
-          onLogin={() => {
-            location.hash = '#/login'
-            setPath({ route: 'login', arg: '' })
+      <>
+        <Suspense fallback={<div className="min-h-screen bg-canvas" />}>
+          <DotGlobeHeroDemo
+            onLogin={() => {
+              location.hash = '#/login'
+              setPath({ route: 'login', arg: '' })
+            }}
+            onSignUp={() => {
+              location.hash = '#/login'
+              setPath({ route: 'login', arg: '' })
+            }}
+          />
+        </Suspense>
+
+        <AutoSpotlightTour
+          currentUser={user}
+          isActive={autoTourActive}
+          onClose={() => {
+            setAutoTourActive(false)
+            localStorage.setItem('brandguard_autotour_dismissed', 'true')
           }}
-          onSignUp={() => {
-            location.hash = '#/login'
-            setPath({ route: 'login', arg: '' })
-          }}
+          onSwitchRole={handleSwitchRole}
         />
-      </Suspense>
+        <Toaster theme="dark" position="top-right" />
+      </>
     )
   }
 
@@ -189,15 +214,23 @@ export default function App() {
             setPath({ route: 'dashboard', arg: '' })
           }}
         />
-        {/* Role Tour Guide */}
-      <RoleTourGuide
-        currentUser={user}
-        isOpen={tourOpen}
-        onClose={() => setTourOpen(false)}
-        onSwitchRole={handleSwitchRole}
-      />
+        <AutoSpotlightTour
+          currentUser={user}
+          isActive={autoTourActive}
+          onClose={() => {
+            setAutoTourActive(false)
+            localStorage.setItem('brandguard_autotour_dismissed', 'true')
+          }}
+          onSwitchRole={handleSwitchRole}
+        />
+        <RoleTourGuide
+          currentUser={user}
+          isOpen={tourOpen}
+          onClose={() => setTourOpen(false)}
+          onSwitchRole={handleSwitchRole}
+        />
 
-      <Toaster theme="dark" position="bottom-right" />
+        <Toaster theme="dark" position="top-right" />
       </>
     )
   }
@@ -409,7 +442,18 @@ export default function App() {
         onSwitchRole={handleSwitchRole}
       />
 
-      <Toaster theme="dark" position="bottom-right" />
+      {/* Auto Spotlight Tour (Global Blocking Guided Walkthrough) */}
+      <AutoSpotlightTour
+        currentUser={user}
+        isActive={autoTourActive}
+        onClose={() => {
+          setAutoTourActive(false)
+          localStorage.setItem('brandguard_autotour_dismissed', 'true')
+        }}
+        onSwitchRole={handleSwitchRole}
+      />
+
+      <Toaster theme="dark" position="top-right" />
     </div>
   )
 }

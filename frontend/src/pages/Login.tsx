@@ -164,6 +164,7 @@ export default function Login({ onLogin }: { onLogin: (u: User) => void }) {
                   <button
                     key={d.email}
                     type="button"
+                    data-tour={d.label === 'Creator' ? 'demo-creator-btn' : undefined}
                     onClick={() => submit(d)}
                     disabled={busy}
                     className="p-2.5 rounded-md bg-surface-2 hover:bg-surface-3

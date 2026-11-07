@@ -134,7 +134,11 @@ export default function DotGlobeHeroDemo({ onLogin, onSignUp }: DotGlobeHeroDemo
 
           <div className="reveal flex flex-col sm:flex-row gap-3.5 justify-center items-center mt-9"
                style={{ transitionDelay: '180ms' }}>
-            <button onClick={handleSignUp} className="btn btn-primary px-6 py-3.5 text-sm shadow-md">
+            <button
+              onClick={handleSignUp}
+              data-tour="hero-demo-btn"
+              className="btn btn-primary px-6 py-3.5 text-sm shadow-md"
+            >
               <UserPlus className="w-4 h-4" />
               Try a demo role
               <ArrowRight className="w-4 h-4" />

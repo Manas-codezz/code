@@ -19,6 +19,7 @@ page.on('pageerror', (e) => fails.push(`pageerror: ${e.message}`))
 try {
   // 1. hero landing & login
   await page.goto(BASE, { waitUntil: 'networkidle' })
+  await page.evaluate(() => localStorage.setItem('brandguard_autotour_dismissed', 'true'))
   let hasHero = true
   try {
     await page.waitForSelector('text=BrandGuard', { timeout: 6000 })
@@ -29,6 +30,10 @@ try {
     await page.locator('button:has-text("Log in")').click()
   } else if (!page.url().includes('#/login')) {
     await page.goto(`${BASE}/#/login`, { waitUntil: 'networkidle' })
+  }
+  await page.evaluate(() => localStorage.setItem('brandguard_autotour_dismissed', 'true'))
+  if (await page.locator('button:has-text("Skip Tour")').isVisible()) {
+    await page.locator('button:has-text("Skip Tour")').click()
   }
   await page.waitForSelector('text=Instant demo access', { timeout: 8000 })
   ok('login page renders', true)

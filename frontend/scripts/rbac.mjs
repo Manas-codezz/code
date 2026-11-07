@@ -10,6 +10,10 @@ const ok = (n, c) => { console.log(`${c ? 'PASS' : 'FAIL'}  ${n}`); if (!c) fail
 async function loginAs(role) {
   const p = await b.newPage({ viewport: { width: 1440, height: 900 } })
   await p.goto(`${BASE}/#/login`, { waitUntil: 'networkidle' })
+  await p.evaluate(() => localStorage.setItem('brandguard_autotour_dismissed', 'true'))
+  if (await p.locator('button:has-text("Skip Tour")').isVisible()) {
+    await p.locator('button:has-text("Skip Tour")').click()
+  }
   await p.locator(`button:has-text("${role}")`).click()
   await p.waitForURL(/#\/dashboard/, { timeout: 8000 })
   return p

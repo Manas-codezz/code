@@ -405,7 +405,7 @@ export default function Review({ selected, user }: { selected: string; user: Use
 
                 {/* Primary Action Buttons */}
                 <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
-                  <Btn onClick={runReview} disabled={busy === 'review'}>
+                  <Btn onClick={runReview} disabled={busy === 'review'} data-tour="run-eval-btn">
                     <span className="flex items-center gap-1.5">
                       <Sparkles className="w-3.5 h-3.5 text-accent" />
                       <span>{busy === 'review' ? 'Evaluating…' : result ? 'Re-run Evaluation' : 'Run AI Evaluation'}</span>
@@ -416,6 +416,7 @@ export default function Review({ selected, user }: { selected: string; user: Use
                   <Btn
                     kind="primary"
                     onClick={approve}
+                    data-tour="approve-draft-btn"
                     disabled={
                       busy === 'approve' ||
                       detail.status === 'approved' ||
@@ -562,7 +563,7 @@ export default function Review({ selected, user }: { selected: string; user: Use
               {/* Right Column: Generated Findings Deck & Reviewer Thread */}
               <div className="lg:col-span-7 space-y-6">
                 {/* Findings Deck (Generated Evaluation Summary) */}
-                <section className="bg-surface border border-hairline rounded-lg overflow-hidden backdrop-blur-sm shadow-none">
+                <section data-tour="findings-list" className="bg-surface border border-hairline rounded-lg overflow-hidden backdrop-blur-sm shadow-none">
                   <header className="px-5 py-3.5 border-b border-hairline flex justify-between items-center bg-surface/40">
                     <div className="flex items-center gap-2.5">
                       <h3 className="text-xs font-semibold uppercase tracking-wider text-ink">
