@@ -1,17 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, msg, type Content, type Finding, type ReviewResult } from '../api'
+import { useCallback, useEffect, useState } from 'react'
+import { api, msg, type Content, type Finding, type ReviewResult, type User } from '../api'
+import { ROLE_RANK } from '../App'
 import {
   Badge, Btn, Empty, Field, SeverityBadge, StatusChip, inputCls,
 } from '../ui'
 import {
   AlertCircle,
   ArrowDown,
+  ArrowLeft,
   Check,
   CheckCircle2,
   ChevronDown,
   Clock,
   Cpu,
-  FileText,
   History,
   MessageSquare,
   Plus,
@@ -34,7 +35,10 @@ interface Diff {
 
 const SEV_ORDER = { critical: 0, warning: 1, suggestion: 2 }
 
-export default function Review({ selected }: { selected: string }) {
+export default function Review({ selected, user }: { selected: string; user: User }) {
+  const rank = ROLE_RANK[user.role]
+  const canReview = rank >= ROLE_RANK.reviewer
+  const canManage = rank >= ROLE_RANK.manager
   const [list, setList] = useState<Content[]>([])
   const [filter, setFilter] = useState('')
   const [detail, setDetail] = useState<Content | null>(null)
@@ -49,7 +53,6 @@ export default function Review({ selected }: { selected: string }) {
     { title: '', text: '', channel: 'web', type: 'text' })
   const [comment, setComment] = useState('')
 
-  const workspaceRef = useRef<HTMLDivElement>(null)
   const cid = Number(selected) || 0
 
   const loadList = useCallback(() => {
@@ -151,6 +154,8 @@ export default function Review({ selected }: { selected: string }) {
 
   return (
     <div className="space-y-8 w-full">
+      {!cid && (
+      <>
       {/* =========================================================================
           SECTION 1: FULL-PAGE REVIEW QUEUE (Top Table View)
       ========================================================================= */}
@@ -165,7 +170,7 @@ export default function Review({ selected }: { selected: string }) {
               </span>
             </div>
             <p className="text-xs text-muted mt-1">
-              Select any copy draft from the queue to inspect compliance findings and run AI evaluations below.
+              Select any draft to open its compliance evaluation workspace.
             </p>
           </div>
 
@@ -258,7 +263,7 @@ export default function Review({ selected }: { selected: string }) {
                 onClick={create}
                 disabled={busy === 'create' || !draft.title || !draft.text}
               >
-                {busy === 'create' ? 'Creating…' : 'Create & Open Review Below'}
+                {busy === 'create' ? 'Creating…' : 'Create & Open'}
               </Btn>
             </div>
           </div>
@@ -290,12 +295,7 @@ export default function Review({ selected }: { selected: string }) {
                 return (
                   <tr
                     key={c.id}
-                    onClick={() => {
-                      location.hash = `#/review/${c.id}`
-                      setTimeout(() => {
-                        workspaceRef.current?.scrollIntoView({ behavior: 'smooth' })
-                      }, 100)
-                    }}
+                    onClick={() => { location.hash = `#/review/${c.id}` }}
                     className={`transition-all duration-200 cursor-pointer ${
                       isSelected
                         ? 'bg-accent/[0.08] shadow-[inset_0_0_0_1px_rgba(249,115,22,0.35)]'
@@ -354,21 +354,22 @@ export default function Review({ selected }: { selected: string }) {
           </table>
         </div>
       </section>
+      </>
+      )}
 
       {/* =========================================================================
           SECTION 2: FULL-PAGE EVALUATION WORKSPACE (Bottom Detailed View)
       ========================================================================= */}
-      <div ref={workspaceRef} className="space-y-6">
-        {!cid ? (
-          <div className="bg-surface-2 border border-hairline rounded-lg p-12 text-center backdrop-blur-sm">
-            <FileText className="w-10 h-10 text-faint mx-auto mb-3" />
-            <h3 className="text-base font-semibold text-ink">No Draft Selected</h3>
-            <p className="text-xs text-muted max-w-md mx-auto mt-1">
-              Click any draft row in the queue above to open the full compliance evaluation workspace, run AI audits, and view generated findings.
-            </p>
-          </div>
-        ) : detail ? (
+      {cid && (
+      <div className="space-y-6">
+        {detail ? (
           <div className="space-y-6">
+            <button
+              onClick={() => { location.hash = '#/review' }}
+              className="inline-flex items-center gap-1.5 text-xs text-muted hover:text-ink min-h-10 px-1 transition-colors"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" /> Back to queue
+            </button>
             {/* Active Draft Action Bar */}
             <div className="bg-surface border border-hairline rounded-lg p-6 backdrop-blur-sm shadow-none">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -410,6 +411,8 @@ export default function Review({ selected }: { selected: string }) {
                       <span>{busy === 'review' ? 'Evaluating…' : result ? 'Re-run Evaluation' : 'Run AI Evaluation'}</span>
                     </span>
                   </Btn>
+                  {canManage && (
+                    <>
                   <Btn
                     kind="primary"
                     onClick={approve}
@@ -436,6 +439,8 @@ export default function Review({ selected }: { selected: string }) {
                   >
                     Request Changes
                   </Btn>
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -615,6 +620,7 @@ export default function Review({ selected }: { selected: string }) {
                           </div>
 
                           {/* Action Buttons */}
+                          {canReview && (
                           <div className="flex gap-2 shrink-0 self-end sm:self-start">
                             {f.accepted !== 1 && (
                               <Btn
@@ -646,6 +652,7 @@ export default function Review({ selected }: { selected: string }) {
                               </Btn>
                             )}
                           </div>
+                          )}
                         </div>
                         {f.accepted === 1 && (
                           <div className="text-xs text-sage mt-2.5 flex items-center gap-1.5 font-medium">
@@ -734,6 +741,7 @@ export default function Review({ selected }: { selected: string }) {
           </div>
         ) : null}
       </div>
+      )}
     </div>
   )
 }

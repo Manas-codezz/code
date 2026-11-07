@@ -284,7 +284,7 @@ def run_review(cid: int, request: Request, force_mock: bool = False,
 
 @app.patch("/findings/{fid}", response_model=Finding)
 def patch_finding(fid: int, body: FindingPatch,
-                  user: dict = Depends(current_user)):
+                  user: dict = Depends(require_role("reviewer"))):
     with db.get() as conn:
         row = db.one(conn, "SELECT * FROM finding WHERE id=?", (fid,))
         if not row:

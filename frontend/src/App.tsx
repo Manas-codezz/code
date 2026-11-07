@@ -299,7 +299,7 @@ export default function App() {
 
         <main id="main" className="px-4 sm:px-6 py-6 sm:py-8 max-w-7xl w-full mx-auto flex-1">
           {path.route === 'dashboard' && <Dashboard />}
-          {path.route === 'review' && <Review key={path.arg || 'list'} selected={path.arg} />}
+          {path.route === 'review' && <Review key={path.arg || 'list'} selected={path.arg} user={user} />}
           {path.route === 'kb' && <KB user={user} />}
         </main>
 
