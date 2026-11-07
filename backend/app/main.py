@@ -191,6 +191,43 @@ def create_user(body: UserCreate, _: dict = Depends(
     return row
 
 
+@app.get("/auth/users")
+def list_users(user: dict = Depends(require_role("admin"))):
+    with db.get() as conn:
+        return db.rows(conn, "SELECT id, email, role, team FROM user")
+
+
+class UserPatch(BaseModel):
+    role: Literal["creator", "reviewer", "manager", "admin"]
+
+
+@app.patch("/auth/users/{uid}")
+def update_user(uid: int, body: UserPatch, admin: dict = Depends(
+        require_role("admin"))):
+    with db.get() as conn:
+        row = db.one(conn, "SELECT * FROM user WHERE id=?", (uid,))
+        if not row:
+            raise HTTPException(404, "user not found")
+        if uid == admin["id"] and body.role != "admin":
+            raise HTTPException(409, "cannot change your own admin role")
+        conn.execute("UPDATE user SET role=? WHERE id=?", (body.role, uid))
+        conn.commit()
+        return db.one(conn, "SELECT id, email, role, team FROM user WHERE id=?",
+                      (uid,))
+
+
+@app.delete("/auth/users/{uid}", status_code=204)
+def delete_user(uid: int, admin: dict = Depends(require_role("admin"))):
+    if uid == admin["id"]:
+        raise HTTPException(409, "cannot delete your own account")
+    with db.get() as conn:
+        row = db.one(conn, "SELECT id FROM user WHERE id=?", (uid,))
+        if not row:
+            raise HTTPException(404, "user not found")
+        conn.execute("DELETE FROM user WHERE id=?", (uid,))
+        conn.commit()
+
+
 # ---------- content ----------
 @app.post("/content", response_model=ContentOut, status_code=201)
 def create_content(body: ContentCreate,

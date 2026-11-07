@@ -33,6 +33,145 @@ interface Diff {
   from: number; to: number; lines: string[]; added: number; removed: number
 }
 
+// Resolve/Unresolve forms for reviewers
+function ResolveForm({ commentId, cid, setComments }: {
+  commentId: number; cid: number; setComments: (c: any[]) => void
+}) {
+  const [showReply, setShowReply] = useState(false)
+  const [reply, setReply] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const handleResolve = async (withReply = false) => {
+    setBusy(true)
+    try {
+      await api(`/comments/${commentId}`, {
+        method: 'PATCH',
+        body: { resolved: true, reply: withReply ? reply : '' }
+      })
+      const fresh = await api<Comment[]>(`/content/${cid}/comments`)
+      setComments(fresh)
+      setShowReply(false)
+      setReply('')
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!showReply) {
+    return (
+      <button
+        className="text-[11px] text-accent hover:text-accent transition-colors cursor-pointer"
+        onClick={() => setShowReply(true)}
+      >
+        Mark resolved
+      </button>
+    )
+  }
+
+  return (
+    <div className="flex gap-1 items-center">
+      <input
+        type="text"
+        value={reply}
+        onChange={(e) => setReply(e.target.value)}
+        placeholder="Reply message (optional)"
+        className="text-[11px] px-2 py-1 border border-hairline rounded bg-surface w-48"
+      />
+      <button
+        className="text-[11px] text-sage hover:text-sage cursor-pointer"
+        onClick={() => handleResolve(true)}
+        disabled={busy}
+      >
+        {busy ? '...' : 'Resolve & Reply'}
+      </button>
+      <button
+        className="text-[11px] text-sage hover:text-sage cursor-pointer"
+        onClick={() => handleResolve(false)}
+        disabled={busy}
+      >
+        Resolve Only
+      </button>
+      <button
+        className="text-[11px] text-faint hover:text-ink cursor-pointer"
+        onClick={() => { setShowReply(false); setReply('') }}
+      >
+        Cancel
+      </button>
+    </div>
+  )
+}
+
+function UnresolveForm({ commentId, cid, setComments }: {
+  commentId: number; cid: number; setComments: (c: any[]) => void
+}) {
+  const [showReply, setShowReply] = useState(false)
+  const [reply, setReply] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const handleUnresolve = async (withReply = false) => {
+    setBusy(true)
+    try {
+      await api(`/comments/${commentId}`, {
+        method: 'PATCH',
+        body: { resolved: false, reply: withReply ? reply : '' }
+      })
+      const fresh = await api<Comment[]>(`/content/${cid}/comments`)
+      setComments(fresh)
+      setShowReply(false)
+      setReply('')
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!showReply) {
+    return (
+      <button
+        className="text-[11px] text-warn hover:text-warn transition-colors cursor-pointer"
+        onClick={() => setShowReply(true)}
+      >
+        Mark unresolved
+      </button>
+    )
+  }
+
+  return (
+    <div className="flex gap-1 items-center">
+      <input
+        type="text"
+        value={reply}
+        onChange={(e) => setReply(e.target.value)}
+        placeholder="Reply message (optional)"
+        className="text-[11px] px-2 py-1 border border-hairline rounded bg-surface w-48"
+      />
+      <button
+        className="text-[11px] text-sage hover:text-sage cursor-pointer"
+        onClick={() => handleUnresolve(true)}
+        disabled={busy}
+      >
+        {busy ? '...' : 'Unresolve & Reply'}
+      </button>
+      <button
+        className="text-[11px] text-sage hover:text-sage cursor-pointer"
+        onClick={() => handleUnresolve(false)}
+        disabled={busy}
+      >
+        Unresolve Only
+      </button>
+      <button
+        className="text-[11px] text-faint hover:text-ink cursor-pointer"
+        onClick={() => { setShowReply(false); setReply('') }}
+      >
+        Cancel
+      </button>
+    </div>
+  )
+}
+
 const SEV_ORDER = { critical: 0, warning: 1, suggestion: 2 }
 
 export default function Review({ selected, user }: { selected: string; user: User }) {
@@ -492,17 +631,77 @@ export default function Review({ selected, user }: { selected: string; user: Use
                       {detail.text.length} chars
                     </span>
                   </header>
-                  <pre className="p-5 text-sm leading-relaxed whitespace-pre-wrap font-sans text-ink bg-surface/70">
-                    {detail.text || <span className="text-faint italic">(Empty text content — visual asset draft)</span>}
-                  </pre>
-                  {detail.image_path && (
-                    <div className="p-5 border-t border-hairline">
-                      <img
-                        src={detail.image_path}
-                        alt=""
-                        className="max-h-60 rounded-md border border-hairline"
-                      />
-                    </div>
+                  {detail.status === 'changes' && user.email === detail.created_by && (
+                    <form
+                      onSubmit={async (e) => {
+                        e.preventDefault()
+                        const form = e.currentTarget
+                        const fd = new FormData(form)
+                        const text = fd.get('text') as string
+                        const title = fd.get('title') as string
+                        setBusy('edit')
+                        try {
+                          await api(`/content/${cid}`, {
+                            method: 'PATCH',
+                            body: { title, text }
+                          })
+                          await loadDetail(cid)
+                        } catch (e) {
+                          setErr(msg(e))
+                        } finally {
+                          setBusy('')
+                        }
+                      }}
+                      className="p-5 space-y-4"
+                    >
+                      <div>
+                        <label className="block text-xs font-medium text-muted mb-1">Title</label>
+                        <input
+                          name="title"
+                          defaultValue={detail.title}
+                          className={inputCls}
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-muted mb-1">Text Content</label>
+                        <textarea
+                          name="text"
+                          defaultValue={detail.text}
+                          className={inputCls}
+                          rows={12}
+                          required
+                        />
+                      </div>
+                      <div className="flex gap-2">
+                        <Btn type="submit" disabled={busy === 'edit'}>
+                          {busy === 'edit' ? 'Saving…' : 'Save Changes'}
+                        </Btn>
+                        <button
+                          type="button"
+                          onClick={() => loadDetail(cid)}
+                          className="px-3 py-1.5 text-xs text-muted hover:text-ink border border-hairline rounded"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                  {(detail.status !== 'changes' || user.email !== detail.created_by) && (
+                    <>
+                      <pre className="p-5 text-sm leading-relaxed whitespace-pre-wrap font-sans text-ink bg-surface/70">
+                        {detail.text || <span className="text-faint italic">(Empty text content — visual asset draft)</span>}
+                      </pre>
+                      {detail.image_path && (
+                        <div className="p-5 border-t border-hairline">
+                          <img
+                            src={detail.image_path}
+                            alt=""
+                            className="max-h-60 rounded-md border border-hairline"
+                          />
+                        </div>
+                      )}
+                    </>
                   )}
                 </section>
 
@@ -558,9 +757,93 @@ export default function Review({ selected, user }: { selected: string; user: Use
                     </div>
                   </section>
                 )}
+
+                {/* Peer Reviewer Thread (moved after Revision Timeline) */}
+                <section className="bg-surface border border-hairline rounded-lg overflow-hidden backdrop-blur-sm shadow-none">
+                  <header className="px-5 py-3.5 border-b border-hairline flex items-center justify-between bg-surface/40">
+                    <div className="flex items-center gap-2">
+                      <MessageSquare className="w-3.5 h-3.5 text-muted" />
+                      <h3 className="text-xs font-semibold uppercase tracking-wider text-ink">
+                        Peer Reviewer Thread
+                      </h3>
+                    </div>
+                    <span className="text-xs text-faint">{comments.length} notes</span>
+                  </header>
+                  <div className="p-5 space-y-4">
+                    {comments.length === 0 && (
+                      <p className="text-xs text-faint">No reviewer notes posted yet on this draft.</p>
+                    )}
+                    {comments.map((c) => (
+                      <div
+                        key={c.id}
+                        className={`p-3.5 rounded-md bg-surface-2 border border-hairline text-xs ${
+                          c.resolved ? 'opacity-40' : ''
+                        }`}
+                      >
+                        <div className="flex gap-2 items-center justify-between mb-1">
+                          <div className="flex items-center gap-2">
+                            <strong className="text-ink">{c.author}</strong>
+                            <span className="text-[11px] text-faint">
+                              {new Date(c.created_at + 'Z').toLocaleDateString(undefined, {
+                                month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                              })}
+                            </span>
+                          </div>
+                          {user.role === 'reviewer' && !c.resolved ? (
+                            <ResolveForm commentId={c.id} cid={cid} setComments={setComments} />
+                          ) : user.role === 'reviewer' && c.resolved ? (
+                            <UnresolveForm commentId={c.id} cid={cid} setComments={setComments} />
+                          ) : (
+                            <span className="text-[11px] text-faint flex items-center gap-1">
+                              {c.resolved ? (
+                                <>
+                                  <Check className="w-3 h-3" /> Resolved
+                                </>
+                              ) : (
+                                'Read only'
+                              )}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-ink leading-relaxed">{c.body}</div>
+                        {/* Show replies */}
+                        {comments.filter(r => r.parent_id === c.id).map((r) => (
+                          <div key={r.id} className="mt-2 ml-4 pl-3 border-l-2 border-hairline text-xs text-faint">
+                            <div className="flex items-center gap-1 mb-0.5">
+                              <strong className="text-ink">{r.author}</strong>
+                              <span className="text-[10px]">
+                                {new Date(r.created_at + 'Z').toLocaleDateString(undefined, {
+                                  month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                                })}
+                              </span>
+                            </div>
+                            <div className="text-ink">{r.body}</div>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+
+                    {/* New Note Form */}
+                    <div className="flex gap-2.5 pt-2">
+                      <input
+                        className={inputCls}
+                        value={comment}
+                        placeholder="Add a review note or compliance feedback…"
+                        onChange={(e) => setComment(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && postComment()}
+                      />
+                      <Btn onClick={postComment} disabled={busy === 'c' || !comment.trim()}>
+                        <span className="flex items-center gap-1.5">
+                          <Send className="w-3.5 h-3.5" />
+                          <span>Post</span>
+                        </span>
+                      </Btn>
+                    </div>
+                  </div>
+                </section>
               </div>
 
-              {/* Right Column: Generated Findings Deck & Reviewer Thread */}
+              {/* Right Column: Generated Findings Deck */}
               <div className="lg:col-span-7 space-y-6">
                 {/* Findings Deck (Generated Evaluation Summary) */}
                 <section data-tour="findings-list" className="bg-surface border border-hairline rounded-lg overflow-hidden backdrop-blur-sm shadow-none">
@@ -664,78 +947,6 @@ export default function Review({ selected, user }: { selected: string; user: Use
                       </li>
                     ))}
                   </ul>
-                </section>
-
-                {/* Peer Review Notes & Comment Thread */}
-                <section className="bg-surface border border-hairline rounded-lg overflow-hidden backdrop-blur-sm shadow-none">
-                  <header className="px-5 py-3.5 border-b border-hairline flex items-center justify-between bg-surface/40">
-                    <div className="flex items-center gap-2">
-                      <MessageSquare className="w-3.5 h-3.5 text-muted" />
-                      <h3 className="text-xs font-semibold uppercase tracking-wider text-ink">
-                        Peer Reviewer Thread
-                      </h3>
-                    </div>
-                    <span className="text-xs text-faint">{comments.length} notes</span>
-                  </header>
-                  <div className="p-5 space-y-4">
-                    {comments.length === 0 && (
-                      <p className="text-xs text-faint">No reviewer notes posted yet on this draft.</p>
-                    )}
-                    {comments.map((c) => (
-                      <div
-                        key={c.id}
-                        className={`p-3.5 rounded-md bg-surface-2 border border-hairline text-xs ${
-                          c.resolved ? 'opacity-40' : ''
-                        }`}
-                      >
-                        <div className="flex gap-2 items-center justify-between mb-1">
-                          <div className="flex items-center gap-2">
-                            <strong className="text-ink">{c.author}</strong>
-                            <span className="text-[11px] text-faint">
-                              {new Date(c.created_at + 'Z').toLocaleDateString(undefined, {
-                                month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
-                              })}
-                            </span>
-                          </div>
-                          {!c.resolved ? (
-                            <button
-                              className="text-[11px] text-accent hover:text-accent transition-colors cursor-pointer"
-                              onClick={async () => {
-                                await api(`/comments/${c.id}`, {
-                                  method: 'PATCH', body: { resolved: true },
-                                })
-                                setComments(await api<Comment[]>(`/content/${cid}/comments`))
-                              }}
-                            >
-                              Mark resolved
-                            </button>
-                          ) : (
-                            <span className="text-[11px] text-sage flex items-center gap-1">
-                              <Check className="w-3 h-3" /> Resolved
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-ink leading-relaxed">{c.body}</div>
-                      </div>
-                    ))}
-
-                    {/* New Note Form */}
-                    <div className="flex gap-2.5 pt-2">
-                      <input
-                        className={inputCls}
-                        value={comment}
-                        placeholder="Add a review note or compliance feedback…"
-                        onChange={(e) => setComment(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && postComment()}
-                      />
-                      <Btn onClick={postComment} disabled={busy === 'c' || !comment.trim()}>
-                        <span className="flex items-center gap-1.5">
-                          <Send className="w-3.5 h-3.5" />
-                          <span>Post</span>
-                        </span>
-                      </Btn>
-                    </div>
-                  </div>
                 </section>
               </div>
             </div>

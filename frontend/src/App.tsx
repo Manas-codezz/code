@@ -4,18 +4,19 @@ import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Review from './pages/Review'
 import KB from './pages/KB'
+import AdminUsersPage from './pages/AdminUsersPage'
 import { BrandLogo } from './components/ui/BrandLogo'
 import RoleTourGuide from './components/ui/RoleTourGuide'
 import AutoSpotlightTour from './components/ui/AutoSpotlightTour'
 import { Toaster, toast } from 'sonner'
 import {
   ArrowRight, BookOpen, Command, Compass, FileCheck2, LayoutDashboard, LogOut,
-  Menu, Search, X,
+  Menu, Search, Shield, X,
 } from 'lucide-react'
 
 const DotGlobeHeroDemo = lazy(() => import('./components/ui/demo'))
 
-type Route = 'hero' | 'login' | 'dashboard' | 'review' | 'kb'
+type Route = 'hero' | 'login' | 'dashboard' | 'review' | 'kb' | 'admin';
 
 function parseHash(isLoggedIn: boolean): { route: Route; arg: string } {
   const h = location.hash.replace(/^#\/?/, '')
@@ -24,6 +25,7 @@ function parseHash(isLoggedIn: boolean): { route: Route; arg: string } {
   if (head === 'review') return { route: 'review', arg }
   if (head === 'kb') return { route: 'kb', arg }
   if (head === 'dashboard') return { route: 'dashboard', arg }
+  if (head === 'admin') return { route: 'admin', arg }
   if (head === 'hero') return { route: 'hero', arg }
   return { route: isLoggedIn ? 'dashboard' : 'hero', arg }
 }
@@ -32,6 +34,7 @@ const NAV: { id: Route; label: string; icon: React.ElementType }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'review', label: 'Review Queue', icon: FileCheck2 },
   { id: 'kb', label: 'Knowledge Base', icon: BookOpen },
+  { id: 'admin', label: 'Users', icon: Shield },
 ]
 
 // role rank for nav gating hints (KB edit UI hides below manager)
@@ -157,7 +160,7 @@ export default function App() {
   }, [cmdOpen])
 
   const commands = useMemo(() => {
-    const base = NAV.map((n) => ({
+    const base = NAV.filter((n) => n.id !== 'admin' || user?.role === 'admin').map((n) => ({
       id: n.id as string,
       label: n.label,
       hint: `Go to ${n.label}`,
@@ -190,7 +193,7 @@ export default function App() {
         run: () => { logout(); setUser(null); setCmdOpen(false) },
       },
     ]
-  }, [])
+  }, [user])
 
   const filtered = commands.filter((c) =>
     (c.label + ' ' + c.hint).toLowerCase().includes(q.toLowerCase()))
@@ -276,7 +279,7 @@ export default function App() {
       </div>
 
       <nav className="flex-1 py-4 space-y-1 px-3" aria-label="Primary">
-        {NAV.map((n) => (
+        {NAV.filter((n) => n.id !== 'admin' || user.role === 'admin').map((n) => (
           <NavLink key={n.id} n={n} active={path.route === n.id}
                    onClick={() => setNavOpen(false)} />
         ))}
@@ -398,6 +401,7 @@ export default function App() {
           {path.route === 'dashboard' && <Dashboard />}
           {path.route === 'review' && <Review key={path.arg || 'list'} selected={path.arg} user={user} />}
           {path.route === 'kb' && <KB user={user} />}
+          {path.route === 'admin' && ROLE_RANK[user.role] >= ROLE_RANK.admin && <AdminUsersPage user={user} />}
         </main>
 
         <footer className="border-t border-hairline px-6 py-4 text-[11px] text-faint

@@ -67,6 +67,7 @@ class CommentBody(BaseModel):
 
 class CommentPatch(BaseModel):
     resolved: bool
+    reply: str = ""
 
 
 class ContentPatch(BaseModel):
@@ -130,13 +131,21 @@ def add_comment(cid: int, body: CommentBody,
 
 @router.patch("/comments/{iid}")
 def resolve_comment(iid: int, body: CommentPatch,
-                    user: dict = Depends(require_role("manager"))):
+                    user: dict = Depends(require_role("reviewer"))):
     with db.get() as conn:
         row = db.one(conn, "SELECT * FROM comment WHERE id=?", (iid,))
         if not row:
             raise HTTPException(404, "comment not found")
         conn.execute("UPDATE comment SET resolved=? WHERE id=?",
                      (1 if body.resolved else 0, iid))
+        # If reply message provided, create a reply comment
+        if body.reply and body.reply.strip():
+            conn.execute(
+                "INSERT INTO comment (content_id, parent_id, author, body) "
+                "VALUES (?,?,?,?)",
+                (row["content_id"], iid, user["email"], body.reply.strip()))
+            db.log_audit(conn, row["content_id"], user["email"], "comment_reply",
+                         body.reply.strip()[:200])
         db.log_audit(conn, row["content_id"], user["email"],
                      "comment_resolve", f"comment {iid} -> {body.resolved}")
         conn.commit()
