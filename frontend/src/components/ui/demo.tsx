@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { DotGlobeHero } from '@/components/ui/globe-hero'
 import {
   ArrowRight, CheckCircle2, FileSearch, Gauge, GitBranch, LayoutDashboard,
   LogIn, ScanLine, ShieldCheck, Sparkles, UserPlus,
 } from 'lucide-react'
 import { loadAuth } from '@/api'
 import { BrandLogo } from '@/components/ui/BrandLogo'
-import { Sparkline } from '@/ui'
+import { AsciiWorkflow } from '@/components/ui/AsciiWorkflow'
 
 export interface DotGlobeHeroDemoProps {
   onLogin?: () => void
@@ -33,35 +32,6 @@ function useReveal() {
   }, [])
 }
 
-/** Cheap rAF parallax: elements drift by viewport-relative offset. */
-function useParallax(root: React.RefObject<HTMLElement | null>) {
-  useEffect(() => {
-    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return
-    const els = Array.from(root.current?.querySelectorAll<HTMLElement>('[data-parallax]') ?? [])
-    if (!els.length) return
-    let raf = 0
-    const update = () => {
-      raf = 0
-      const vh = innerHeight
-      for (const el of els) {
-        const speed = Number(el.dataset.parallax || 0)
-        const rect = el.getBoundingClientRect()
-        const delta = (rect.top + rect.height / 2 - vh / 2) * speed
-        el.style.transform = `translate3d(0, ${delta.toFixed(1)}px, 0)`
-      }
-    }
-    const onScroll = () => { if (!raf) raf = requestAnimationFrame(update) }
-    update()
-    addEventListener('scroll', onScroll, { passive: true })
-    addEventListener('resize', onScroll)
-    return () => {
-      removeEventListener('scroll', onScroll)
-      removeEventListener('resize', onScroll)
-      if (raf) cancelAnimationFrame(raf)
-    }
-  }, [root])
-}
-
 const STEPS = [
   { icon: FileSearch, title: 'Submit copy', body: 'Drop in a draft, email, social post or image. Channel and team are recorded automatically.' },
   { icon: ScanLine, title: 'Run the review', body: 'Deterministic rules plus a governed LLM return findings with severity, evidence and a fix suggestion.' },
@@ -80,7 +50,6 @@ export default function DotGlobeHeroDemo({ onLogin, onSignUp }: DotGlobeHeroDemo
   const root = useRef<HTMLDivElement>(null)
   const [showCta, setShowCta] = useState(false)
   useReveal()
-  useParallax(root)
 
   useEffect(() => {
     const on = () => setShowCta(scrollY > innerHeight * 0.9)
@@ -134,7 +103,7 @@ export default function DotGlobeHeroDemo({ onLogin, onSignUp }: DotGlobeHeroDemo
       </header>
 
       {/* HERO */}
-      <DotGlobeHero rotationSpeed={0.0025} className="bg-canvas min-h-screen">
+      <section className="bg-canvas min-h-screen">
         <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 pt-28 pb-24">
           <div className="grid lg:grid-cols-[1.1fr_0.9fr] gap-12 items-center">
             <div className="text-center lg:text-left">
@@ -175,37 +144,11 @@ export default function DotGlobeHeroDemo({ onLogin, onSignUp }: DotGlobeHeroDemo
               </p>
             </div>
 
-            {/* Floating cards with parallax */}
-            <div className="relative h-[340px] hidden sm:block" aria-hidden="true">
-              <div data-parallax="-0.08" className="absolute top-2 left-0 w-56 card p-4">
-                <div className="eyebrow">Compliance rate</div>
-                <div className="font-mono text-3xl font-medium mt-1 tabular">94.2%</div>
-                <div className="text-[11px] text-sage mt-1">▲ 2.1 pts</div>
-                <Sparkline points={[62, 66, 64, 70, 72, 76, 80, 86, 90, 94]} tone="sage" className="mt-2" />
-              </div>
-
-              <div data-parallax="0.06" className="absolute top-24 right-0 w-60 panel p-4">
-                <div className="eyebrow">Open criticals</div>
-                <div className="font-mono text-3xl font-medium mt-1 tabular">07</div>
-                <div className="text-[11px] text-warn mt-1">3 past SLA</div>
-                <div className="mt-3 space-y-1.5">
-                  {[82, 64, 48, 30].map((w) => (
-                    <div key={w} className="h-1.5 rounded bg-surface-3 overflow-hidden">
-                      <div className="h-full bg-accent" style={{ width: `${w}%` }} />
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div data-parallax="-0.12" className="absolute bottom-0 left-8 w-52 card p-4">
-                <div className="eyebrow">Verified facts</div>
-                <div className="font-mono text-3xl font-medium mt-1 tabular">128</div>
-                <div className="text-[11px] text-muted mt-1">12 stale &gt; 90 days</div>
-              </div>
-            </div>
+            {/* ASCII live-session workflow */}
+            <AsciiWorkflow />
           </div>
         </div>
-      </DotGlobeHero>
+      </section>
 
       {/* STATS */}
       <section className="border-y border-hairline bg-surface">

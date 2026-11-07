@@ -186,3 +186,28 @@ body { margin: 0; }
   --error-text: var(--color-danger);
   font-family: var(--font-sans);
 }
+
+/* ASCII hero scene: staggered per-character materialize */
+@keyframes ascii-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes ascii-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateY(-3px); }
+}
+.ascii-char {
+  display: inline-block;
+  opacity: 0;
+  animation: ascii-in 0.32s ease-out both;
+}
+.ascii-char-out {
+  animation: ascii-out 0.32s ease-in both;
+}
+.ascii-caption {
+  animation: fade-up 0.4s ease-out both;
+}
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
