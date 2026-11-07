@@ -1,151 +1,448 @@
-"use client";
-
-import { motion } from "framer-motion";
-import { DotGlobeHero } from "@/components/ui/globe-hero";
-import { ArrowRight, LogIn, Sparkles, UserPlus, LayoutDashboard } from "lucide-react";
-import { loadAuth } from "@/api";
-import { BrandLogo } from "@/components/ui/BrandLogo";
+import { useEffect, useRef, useState } from 'react'
+import { DotGlobeHero } from '@/components/ui/globe-hero'
+import {
+  ArrowRight, CheckCircle2, FileSearch, Gauge, GitBranch, LayoutDashboard,
+  LogIn, ScanLine, ShieldCheck, Sparkles, UserPlus,
+} from 'lucide-react'
+import { loadAuth } from '@/api'
+import { BrandLogo } from '@/components/ui/BrandLogo'
+import { Sparkline } from '@/ui'
 
 export interface DotGlobeHeroDemoProps {
-  onLogin?: () => void;
-  onSignUp?: () => void;
+  onLogin?: () => void
+  onSignUp?: () => void
 }
+
+/** Reveal on scroll — one observer for every `.reveal` in the page. */
+function useReveal() {
+  useEffect(() => {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      document.querySelectorAll('.reveal').forEach((el) => el.classList.add('is-in'))
+      return
+    }
+    const io = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        if (e.isIntersecting) {
+          e.target.classList.add('is-in')
+          io.unobserve(e.target)
+        }
+      }
+    }, { threshold: 0.12, rootMargin: '0px 0px -8% 0px' })
+    document.querySelectorAll('.reveal').forEach((el) => io.observe(el))
+    return () => io.disconnect()
+  }, [])
+}
+
+/** Cheap rAF parallax: elements drift by viewport-relative offset. */
+function useParallax(root: React.RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    const els = Array.from(root.current?.querySelectorAll<HTMLElement>('[data-parallax]') ?? [])
+    if (!els.length) return
+    let raf = 0
+    const update = () => {
+      raf = 0
+      const vh = innerHeight
+      for (const el of els) {
+        const speed = Number(el.dataset.parallax || 0)
+        const rect = el.getBoundingClientRect()
+        const delta = (rect.top + rect.height / 2 - vh / 2) * speed
+        el.style.transform = `translate3d(0, ${delta.toFixed(1)}px, 0)`
+      }
+    }
+    const onScroll = () => { if (!raf) raf = requestAnimationFrame(update) }
+    update()
+    addEventListener('scroll', onScroll, { passive: true })
+    addEventListener('resize', onScroll)
+    return () => {
+      removeEventListener('scroll', onScroll)
+      removeEventListener('resize', onScroll)
+      if (raf) cancelAnimationFrame(raf)
+    }
+  }, [root])
+}
+
+const STEPS = [
+  { icon: FileSearch, title: 'Submit copy', body: 'Drop in a draft, email, social post or image. Channel and team are recorded automatically.' },
+  { icon: ScanLine, title: 'Run the review', body: 'Deterministic rules plus a governed LLM return findings with severity, evidence and a fix suggestion.' },
+  { icon: CheckCircle2, title: 'Human sign-off', body: 'A reviewer accepts or dismisses every finding. Approval is the only path to publish — and it is audited.' },
+]
+
+const FEATURES = [
+  { icon: ShieldCheck, title: 'Evidence-backed findings', body: 'Every finding cites the fact, guideline or glossary term it was checked against.' },
+  { icon: Gauge, title: 'SLA monitors', body: 'Review deadlines are tracked per draft; breaches surface before they ship.' },
+  { icon: GitBranch, title: 'Tamper-evident audit', body: 'Hash-chained log of every action, actor and model call.' },
+  { icon: Sparkles, title: 'Governed LLM', body: 'Groq, OpenAI or a deterministic fallback — the same contract either way.' },
+]
 
 export default function DotGlobeHeroDemo({ onLogin, onSignUp }: DotGlobeHeroDemoProps) {
-  const user = loadAuth()?.user;
+  const user = loadAuth()?.user
+  const root = useRef<HTMLDivElement>(null)
+  const [showCta, setShowCta] = useState(false)
+  useReveal()
+  useParallax(root)
+
+  useEffect(() => {
+    const on = () => setShowCta(scrollY > innerHeight * 0.9)
+    on()
+    addEventListener('scroll', on, { passive: true })
+    return () => removeEventListener('scroll', on)
+  }, [])
 
   const handleLogin = () => {
-    if (onLogin) onLogin();
-    else window.location.hash = "#/login";
-  };
-
+    if (onLogin) onLogin()
+    else window.location.hash = '#/login'
+  }
   const handleSignUp = () => {
-    if (onSignUp) onSignUp();
-    else window.location.hash = "#/login";
-  };
+    if (onSignUp) onSignUp()
+    else window.location.hash = '#/login'
+  }
 
   return (
-    <DotGlobeHero
-      rotationSpeed={0.0035}
-      className="bg-gradient-to-b from-[#030712] via-[#09090b] to-[#050508] relative overflow-hidden text-zinc-100"
-    >
-      {/* Dark mode atmospheric glows without flickering or loading animations */}
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(219,75,22,0.18),rgba(255,255,255,0))]" />
-      <div className="absolute inset-0 bg-gradient-to-t from-[#09090b] via-transparent to-[#030712]/70" />
-      <div className="absolute top-1/4 left-1/4 w-[32rem] h-[32rem] bg-orange-600/10 rounded-full blur-[140px] pointer-events-none" />
-      <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-orange-600/10 rounded-full blur-[120px] pointer-events-none" />
-
-      {/* Top Floating Nav Bar */}
-      <header className="absolute top-0 inset-x-0 z-20 flex items-center justify-between px-6 sm:px-12 py-6 max-w-7xl mx-auto w-full">
-        <div className="flex items-center gap-2.5">
-          <BrandLogo className="w-7 h-7" />
-          <span className="text-lg font-bold tracking-tight text-white">BrandGuard</span>
-        </div>
-
-        <div className="flex items-center gap-3">
-          {user ? (
-            <a
-              href="#/dashboard"
-              className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-orange-400 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/30 rounded-lg backdrop-blur-md transition-colors"
-            >
-              <LayoutDashboard className="w-3.5 h-3.5" />
-              Open Dashboard ({user.role})
-            </a>
-          ) : (
-            <button
-              onClick={handleLogin}
-              className="text-xs font-semibold uppercase tracking-wider text-zinc-300 hover:text-white px-4 py-2 rounded-lg hover:bg-white/5 transition-colors"
-            >
-              Sign in
-            </button>
-          )}
+    <div ref={root} className="bg-canvas text-ink">
+      {/* Fixed nav */}
+      <header className="fixed top-0 inset-x-0 z-30 border-b border-hairline bg-canvas/85 backdrop-blur-md">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
+          <a href="#/hero" className="flex items-center gap-2.5 py-2">
+            <BrandLogo className="w-7 h-7" />
+            <span className="text-base font-bold tracking-tight">BrandGuard</span>
+          </a>
+          <nav className="hidden md:flex items-center gap-6 text-xs font-medium text-muted" aria-label="Sections">
+            <a href="#how" className="inline-flex items-center min-h-10 hover:text-ink transition-colors">How it works</a>
+            <a href="#features" className="inline-flex items-center min-h-10 hover:text-ink transition-colors">Features</a>
+            <a href="#preview" className="inline-flex items-center min-h-10 hover:text-ink transition-colors">Product</a>
+          </nav>
+          <div className="flex items-center gap-2">
+            {user ? (
+              <a href="#/dashboard" className="btn btn-primary">
+                <LayoutDashboard className="w-4 h-4" />
+                Dashboard ({user.role})
+              </a>
+            ) : (
+              <>
+                <button onClick={handleLogin} className="btn btn-ghost hidden sm:inline-flex">
+                  Sign in
+                </button>
+                <button onClick={handleSignUp} className="btn btn-primary">
+                  <LogIn className="w-4 h-4" />
+                  Demo access
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </header>
-      
-      <div className="relative z-10 text-center space-y-10 max-w-5xl mx-auto px-6 py-20 mt-8">
-        <motion.div
-          initial={{ opacity: 1, y: 0 }}
-          className="space-y-6"
-        >
-          {/* Static Top Pill Badge without loading or ping animations */}
-          <div className="relative inline-flex items-center gap-2.5 px-5 py-2 rounded-full bg-white/[0.04] border border-white/10 backdrop-blur-xl shadow-2xl">
-            <Sparkles className="w-3.5 h-3.5 text-orange-400" />
-            <span className="relative z-10 text-xs font-semibold text-orange-400 tracking-wider uppercase">
-              BrandGuard · Autonomous Brand Governance
-            </span>
-          </div>
-          
-          {/* Main Hero Headline */}
-          <div className="space-y-4">
-            <h1 
-              className="text-5xl sm:text-6xl md:text-7xl lg:text-8xl font-black tracking-tighter leading-[0.92] select-none text-white"
-              style={{ fontFamily: 'Inter, system-ui, sans-serif' }}
-            >
-              <span className="block font-light text-zinc-400 mb-2 text-3xl sm:text-5xl md:text-6xl">
-                Protect & Align
-              </span>
-              <span className="block relative">
-                <span className="bg-gradient-to-r from-orange-400 via-orange-500 to-amber-400 bg-clip-text text-transparent font-black relative z-10">
-                  Global Brand Integrity
-                </span>
-                <div 
-                  className="absolute inset-0 bg-gradient-to-r from-orange-400 via-orange-500 to-amber-400 bg-clip-text text-transparent font-black blur-2xl opacity-35 scale-105 pointer-events-none" 
-                  style={{ fontFamily: 'Inter, system-ui, sans-serif' }}
-                >
-                  Global Brand Integrity
-                </div>
-                <div className="absolute -bottom-3 left-0 h-1.5 w-full bg-gradient-to-r from-orange-500 via-amber-500 to-transparent rounded-full shadow-[0_0_15px_rgba(249,115,22,0.6)]" />
-              </span>
-            </h1>
-          </div>
-          
-          {/* Subtitle */}
-          <div className="max-w-3xl mx-auto space-y-3 pt-4">
-            <p 
-              className="text-lg sm:text-xl md:text-2xl text-zinc-300 leading-relaxed font-normal" 
-              style={{ fontFamily: 'Inter, system-ui, sans-serif' }}
-            >
-              Real-time multi-channel copy review with our{" "}
-              <span className="text-white font-medium bg-white/[0.08] px-2.5 py-1 rounded-md border border-white/15">
-                governed LLM + deterministic rule engine
-              </span>
-            </p>
-            <p className="text-sm sm:text-base text-zinc-400 leading-relaxed max-w-2xl mx-auto">
-              Verify claims, eliminate prohibited vocabulary, enforce accessibility guidelines, and eliminate SLA breaches across every market.
-            </p>
-          </div>
-        </motion.div>
 
-        {/* Bottom Action Buttons: Login and Sign up */}
-        <div className="flex flex-col sm:flex-row gap-4 justify-center items-center pt-2">
-          {/* Login Button */}
-          <button
-            type="button"
-            onClick={handleLogin}
-            className="group relative inline-flex items-center justify-center gap-3 px-8 py-3.5 bg-gradient-to-r from-orange-600 to-orange-500 hover:from-orange-500 hover:to-orange-400 text-white rounded-xl font-semibold text-base shadow-[0_0_30px_rgba(219,75,22,0.35)] border border-orange-400/30 transition-all duration-300 hover:scale-105 active:scale-95 cursor-pointer w-full sm:w-auto"
-          >
-            <LogIn className="w-5 h-5 transition-transform group-hover:scale-110" />
-            <span className="tracking-wide">Log in</span>
-            <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-          </button>
-          
-          {/* Sign up / Demo Access Button */}
-          <button
-            type="button"
-            onClick={handleSignUp}
-            className="group relative inline-flex items-center justify-center gap-3 px-8 py-3.5 border border-white/15 hover:border-orange-500/50 bg-white/[0.05] hover:bg-white/[0.1] text-zinc-100 rounded-xl font-semibold text-base transition-all duration-300 backdrop-blur-xl shadow-lg hover:scale-105 active:scale-95 cursor-pointer w-full sm:w-auto"
-          >
-            <UserPlus className="w-5 h-5 text-orange-400 transition-transform group-hover:scale-110" />
-            <span className="tracking-wide">Sign up / Demo Access</span>
-          </button>
+      {/* HERO */}
+      <DotGlobeHero rotationSpeed={0.0025} className="bg-canvas min-h-screen">
+        <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 pt-28 pb-24">
+          <div className="grid lg:grid-cols-[1.1fr_0.9fr] gap-12 items-center">
+            <div className="text-center lg:text-left">
+              <span className="reveal inline-flex items-center gap-2 px-3 py-1.5 rounded-md
+                bg-surface-2 border border-hairline text-[11px] font-semibold uppercase
+                tracking-wider text-accent">
+                <Sparkles className="w-3.5 h-3.5" />
+                Autonomous brand governance
+              </span>
+
+              <h1 className="reveal font-serif text-5xl sm:text-6xl xl:text-7xl leading-[0.98]
+                tracking-tight mt-6" style={{ transitionDelay: '60ms' }}>
+                Brand integrity,
+                <br />
+                <em className="italic text-accent">governed</em> end to end.
+              </h1>
+
+              <p className="reveal text-muted text-base sm:text-lg leading-relaxed
+                max-w-xl mx-auto lg:mx-0 mt-6" style={{ transitionDelay: '120ms' }}>
+                Review every draft against your knowledge base — with evidence,
+                SLA timers, human sign-off and a tamper-evident audit trail.
+              </p>
+
+              <div className="reveal flex flex-col sm:flex-row gap-3 justify-center lg:justify-start mt-8"
+                   style={{ transitionDelay: '180ms' }}>
+                <button onClick={handleSignUp} className="btn btn-primary px-5 py-3 text-sm">
+                  <UserPlus className="w-4 h-4" />
+                  Try a demo role
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+                <a href="#how" className="btn btn-ghost px-5 py-3 text-sm">
+                  See how it works
+                </a>
+              </div>
+
+              <p className="reveal text-xs text-faint mt-6" style={{ transitionDelay: '240ms' }}>
+                Advisory AI findings · human-in-the-loop approvals · hash-chained audit
+              </p>
+            </div>
+
+            {/* Floating cards with parallax */}
+            <div className="relative h-[340px] hidden sm:block" aria-hidden="true">
+              <div data-parallax="-0.08" className="absolute top-2 left-0 w-56 card p-4">
+                <div className="eyebrow">Compliance rate</div>
+                <div className="font-mono text-3xl font-medium mt-1 tabular">94.2%</div>
+                <div className="text-[11px] text-sage mt-1">▲ 2.1 pts</div>
+                <Sparkline points={[62, 66, 64, 70, 72, 76, 80, 86, 90, 94]} tone="sage" className="mt-2" />
+              </div>
+
+              <div data-parallax="0.06" className="absolute top-24 right-0 w-60 panel p-4">
+                <div className="eyebrow">Open criticals</div>
+                <div className="font-mono text-3xl font-medium mt-1 tabular">07</div>
+                <div className="text-[11px] text-warn mt-1">3 past SLA</div>
+                <div className="mt-3 space-y-1.5">
+                  {[82, 64, 48, 30].map((w) => (
+                    <div key={w} className="h-1.5 rounded bg-surface-3 overflow-hidden">
+                      <div className="h-full bg-accent" style={{ width: `${w}%` }} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div data-parallax="-0.12" className="absolute bottom-0 left-8 w-52 card p-4">
+                <div className="eyebrow">Verified facts</div>
+                <div className="font-mono text-3xl font-medium mt-1 tabular">128</div>
+                <div className="text-[11px] text-muted mt-1">12 stale &gt; 90 days</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </DotGlobeHero>
+
+      {/* STATS */}
+      <section className="border-y border-hairline bg-surface">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 grid grid-cols-2 lg:grid-cols-4 gap-8">
+          {[
+            ['5', 'review categories'],
+            ['100%', 'human sign-off'],
+            ['7/30/90d', 'compliance trends'],
+            ['0', 'unlogged approvals'],
+          ].map(([n, l], i) => (
+            <div key={l} className="reveal" style={{ transitionDelay: `${i * 60}ms` }}>
+              <div className="font-serif text-4xl tracking-tight">{n}</div>
+              <div className="text-xs text-muted mt-1">{l}</div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* HOW IT WORKS */}
+      <section id="how" className="max-w-6xl mx-auto px-4 sm:px-6 py-20">
+        <div className="reveal max-w-2xl">
+          <span className="eyebrow">How it works</span>
+          <h2 className="font-serif text-4xl sm:text-5xl tracking-tight mt-3">
+            Three steps, one accountable trail.
+          </h2>
+        </div>
+        <div className="grid md:grid-cols-3 gap-5 mt-10">
+          {STEPS.map((s, i) => {
+            const Icon = s.icon
+            return (
+              <div key={s.title} className="reveal card p-6"
+                   style={{ transitionDelay: `${i * 90}ms` }}>
+                <div className="flex items-center justify-between">
+                  <div className="w-10 h-10 rounded-md bg-accent/12 border border-accent/25
+                    grid place-items-center text-accent">
+                    <Icon className="w-5 h-5" />
+                  </div>
+                  <span className="font-mono text-xs text-faint">0{i + 1}</span>
+                </div>
+                <h3 className="text-base font-semibold mt-4">{s.title}</h3>
+                <p className="text-sm text-muted leading-relaxed mt-2">{s.body}</p>
+              </div>
+            )
+          })}
+        </div>
+      </section>
+
+      {/* BENTO */}
+      <section id="features" className="max-w-6xl mx-auto px-4 sm:px-6 pb-20">
+        <div className="reveal flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+          <div>
+            <span className="eyebrow">Features</span>
+            <h2 className="font-serif text-4xl sm:text-5xl tracking-tight mt-3">
+              Built for teams that ship copy.
+            </h2>
+          </div>
+          <p className="text-sm text-muted max-w-sm">
+            Every surface is designed around one question: can this claim be defended?
+          </p>
         </div>
 
-        <div className="text-xs text-zinc-500 pt-6">
-          Advisory AI findings · Human-in-the-loop approvals · Full cryptographic audit trail
+        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 mt-10">
+          {FEATURES.map((f, i) => {
+            const Icon = f.icon
+            return (
+              <div key={f.title} className="reveal panel p-5"
+                   style={{ transitionDelay: `${i * 70}ms` }}>
+                <Icon className="w-5 h-5 text-accent" />
+                <h3 className="text-sm font-semibold mt-3">{f.title}</h3>
+                <p className="text-xs text-muted leading-relaxed mt-1.5">{f.body}</p>
+              </div>
+            )
+          })}
+        </div>
+
+        <div className="grid lg:grid-cols-[1.4fr_1fr] gap-4 mt-4">
+          <div className="reveal card p-6">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold">Guideline-gap heat map</h3>
+              <span className="text-[11px] text-faint">category × severity</span>
+            </div>
+            <div className="mt-5 space-y-2">
+              {['tone', 'claim', 'term', 'a11y', 'visual'].map((c, i) => (
+                <div key={c} className="grid grid-cols-[64px_1fr] items-center gap-3">
+                  <span className="text-[11px] text-muted capitalize">{c}</span>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {[0.85, 0.45, 0.22].map((a, j) => (
+                      <div key={j} className="h-7 rounded-sm"
+                           style={{ background: `color-mix(in oklab, var(--color-accent) ${(a * 100) - i * 8}%, var(--color-surface-2))` }} />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="reveal panel p-6" style={{ transitionDelay: '80ms' }}>
+            <h3 className="text-sm font-semibold">Review queue</h3>
+            <ul className="mt-4 space-y-3 text-xs">
+              {[
+                ['Enterprise launch copy', 'Approved', 'text-sage'],
+                ['Partner one-pager', 'Review', 'text-warn'],
+                ['Paid social claim', 'Changes', 'text-danger'],
+                ['Product factsheet', 'Draft', 'text-muted'],
+              ].map(([t, s, c]) => (
+                <li key={t} className="flex items-center justify-between gap-3
+                  border-b border-hairline pb-2 last:border-0">
+                  <span className="truncate text-ink">{t}</span>
+                  <span className={`${c} font-semibold uppercase tracking-wider text-[10px]`}>{s}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      {/* PRODUCT PREVIEW */}
+      <section id="preview" className="border-y border-hairline bg-surface">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-20 grid lg:grid-cols-[0.9fr_1.1fr] gap-10 items-center">
+          <div className="reveal">
+            <span className="eyebrow">Product</span>
+            <h2 className="font-serif text-4xl sm:text-5xl tracking-tight mt-3">
+              A dashboard that answers “are we safe to publish?”
+            </h2>
+            <p className="text-sm text-muted leading-relaxed mt-4 max-w-md">
+              Compliance rate, open criticals, SLA breaches and team performance —
+              three to five primary numbers, with detail on demand.
+            </p>
+            <ul className="mt-6 space-y-2.5 text-sm text-muted">
+              {['Role-aware dashboards for creators, reviewers and managers',
+                'Trend chart over 7, 30 or 90 days',
+                'Team and rule drill-downs without mixing time windows'].map((t) => (
+                <li key={t} className="flex items-start gap-2.5">
+                  <CheckCircle2 className="w-4 h-4 text-sage shrink-0 mt-0.5" />
+                  <span>{t}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div className="reveal card p-4 sm:p-5" style={{ transitionDelay: '80ms' }}>
+            <div className="flex items-center justify-between border-b border-hairline pb-3">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-accent" />
+                <span className="text-xs font-semibold">Compliance dashboard</span>
+              </div>
+              <div className="flex gap-1 text-[10px] font-mono">
+                {['7d', '30d', '90d'].map((d, i) => (
+                  <span key={d} className={`px-2 py-1 rounded ${i === 1 ? 'bg-accent/15 text-accent' : 'text-faint'}`}>{d}</span>
+                ))}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4">
+              {[['94.2%', 'Compliance', 'text-sage'], ['07', 'Criticals', 'text-danger'],
+                ['21', 'Awaiting', 'text-warn'], ['128', 'Facts', 'text-accent']].map(([v, l, c]) => (
+                <div key={l} className="panel p-3">
+                  <div className="text-[10px] text-faint uppercase tracking-wider">{l}</div>
+                  <div className={`font-mono text-xl mt-1 ${c}`}>{v}</div>
+                </div>
+              ))}
+            </div>
+            <div className="panel p-3 mt-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] text-muted">Compliance trend</span>
+                <span className="text-[10px] text-faint">30 days</span>
+              </div>
+              <svg viewBox="0 0 420 90" className="w-full h-24 mt-2" preserveAspectRatio="none" aria-hidden="true">
+                {[20, 45, 70].map((y) => (
+                  <line key={y} x1="0" y1={y} x2="420" y2={y} stroke="var(--color-hairline)" strokeWidth="1" />
+                ))}
+                <path d="M0,74 L60,70 L120,66 L180,58 L240,52 L300,40 L360,34 L420,22 L420,90 L0,90 Z"
+                      fill="rgba(163,147,191,0.10)" />
+                <path d="M0,74 L60,70 L120,66 L180,58 L240,52 L300,40 L360,34 L420,22"
+                      fill="none" stroke="var(--color-accent)" strokeWidth="2" />
+                <path d="M0,80 L60,78 L120,80 L180,74 L240,76 L300,68 L360,70 L420,64"
+                      fill="none" stroke="var(--color-warn)" strokeWidth="1.5" strokeDasharray="4 4" />
+              </svg>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* FINAL CTA */}
+      <section className="max-w-6xl mx-auto px-4 sm:px-6 py-24 text-center">
+        <div className="reveal">
+          <span className="eyebrow">Start here</span>
+          <h2 className="font-serif text-4xl sm:text-6xl tracking-tight mt-4 max-w-3xl mx-auto">
+            Publish with evidence, not hope.
+          </h2>
+          <p className="text-muted text-sm sm:text-base mt-4 max-w-xl mx-auto">
+            Open a demo role and run a draft through the full review, approval and audit flow.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-3 justify-center mt-8">
+            <button onClick={handleSignUp} className="btn btn-primary px-6 py-3 text-sm">
+              <UserPlus className="w-4 h-4" />
+              Try a demo role
+            </button>
+            <button onClick={handleLogin} className="btn btn-ghost px-6 py-3 text-sm">
+              <LogIn className="w-4 h-4" />
+              Sign in
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <footer className="border-t border-hairline">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8 flex flex-col sm:flex-row
+          items-center justify-between gap-3 text-xs text-faint">
+          <div className="flex items-center gap-2.5">
+            <BrandLogo className="w-6 h-6" />
+            <span>BrandGuard AI — advisory findings, human sign-off.</span>
+          </div>
+          <div className="flex gap-1 text-muted">
+            <a href="#how" className="inline-flex items-center justify-center min-h-10 min-w-10 px-2 hover:text-ink transition-colors">How it works</a>
+            <a href="#features" className="inline-flex items-center justify-center min-h-10 min-w-10 px-2 hover:text-ink transition-colors">Features</a>
+            <a href="#/login" className="inline-flex items-center justify-center min-h-10 min-w-10 px-2 hover:text-ink transition-colors">Sign in</a>
+          </div>
+        </div>
+      </footer>
+
+      {/* Sticky CTA after hero */}
+      <div className={`fixed bottom-0 inset-x-0 z-30 border-t border-hairline bg-surface
+        transition-transform duration-300 ${showCta ? 'translate-y-0' : 'translate-y-full'}`}>
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-4">
+          <p className="text-xs text-muted hidden sm:block">
+            <strong className="text-ink">Ready to see it on your copy?</strong> Demo roles open instantly.
+          </p>
+          <div className="flex gap-2 ml-auto">
+            <button onClick={handleLogin} className="btn btn-ghost">Sign in</button>
+            <button onClick={handleSignUp} className="btn btn-primary">
+              Try a demo role <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </div>
-    </DotGlobeHero>
-  );
+    </div>
+  )
 }
 
-export { DotGlobeHeroDemo };
+export { DotGlobeHeroDemo }

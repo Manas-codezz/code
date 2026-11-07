@@ -1,64 +1,188 @@
 @import "tailwindcss";
 
+/* Amethyst & Sage — flat, editorial, no gradients or glow. */
 @theme {
-  --color-paper: #faf9f6;
-  --color-surface: #ffffff;
-  --color-ink: #16130f;
-  --color-ink2: #6b6560;
-  --color-hairline: #e7e3dc;
-  --color-accent: #db4b16;
-  --color-critical: #be3a1e;
-  --color-warning: #a16207;
-  --color-suggestion: #57534e;
-  --color-ok: #15803d;
+  --color-canvas: #080708;
+  --color-surface: #121016;
+  --color-surface-2: #1a1720;
+  --color-surface-3: #221e2b;
 
-  /* shadcn color tokens mapped to BrandGuard palette */
-  --color-background: #faf9f6;
-  --color-foreground: #16130f;
-  --color-primary: #db4b16;
-  --color-primary-foreground: #ffffff;
-  --color-muted: #f0ece6;
-  --color-muted-foreground: #6b6560;
-  --color-border: #e7e3dc;
+  --color-ink: #ece9f0;
+  --color-muted: #9a93a6;
+  --color-faint: #6e6878;
 
-  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --color-hairline: #2a2633;
+  --color-hairline-strong: #3a3446;
+
+  --color-accent: #a393bf;
+  --color-accent-hover: #9882ac;
+  --color-accent-press: #73648a;
+  --color-sage: #c3dac3;
+  --color-warn: #d9b978;
+  --color-danger: #e58a8a;
+  --color-info: #a9bed6;
+
+  --color-chart-1: #a393bf;
+  --color-chart-2: #c3dac3;
+  --color-chart-3: #73648a;
+  --color-chart-4: #c9a24b;
+  --color-chart-5: #8fa9c9;
+
+  --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-serif: "Instrument Serif", Georgia, "Times New Roman", serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 :root {
-  --background: 36 25% 97%;
-  --foreground: 30 18% 7%;
-  --primary: 16 82% 47%;
-  --primary-foreground: 0 0% 100%;
-  --muted: 33 17% 91%;
-  --muted-foreground: 27 6% 40%;
-  --border: 37 20% 89%;
-  --accent: 16 82% 47%;
-  --accent-foreground: 0 0% 100%;
+  color-scheme: dark;
+  --radius: 8px;
+  --ring: var(--color-accent);
 }
 
 html {
-  background: var(--color-paper);
+  background: var(--color-canvas);
   color: var(--color-ink);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  scroll-behavior: smooth;
 }
 
-/* micro-label: the editorial uppercase eyebrow */
-.eyebrow {
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--color-ink2);
-  font-weight: 600;
+body { margin: 0; }
+
+::selection {
+  background: color-mix(in oklab, var(--color-accent) 32%, transparent);
+  color: #fff;
 }
 
-.tabular {
-  font-variant-numeric: tabular-nums;
-}
-
-/* focus ring — accessible, on-brand */
 :focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 1px;
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-hairline-strong) transparent;
+}
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb {
+  background: var(--color-hairline-strong);
+  border-radius: 8px;
+  border: 2px solid var(--color-canvas);
+}
+
+@layer components {
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--color-faint);
+  }
+
+  .tabular { font-variant-numeric: tabular-nums; }
+
+  .card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-hairline);
+    border-radius: var(--radius);
+  }
+
+  .panel {
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-hairline);
+    border-radius: var(--radius);
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    min-height: 2.5rem;
+    padding: 0.55rem 0.9rem;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1;
+    cursor: pointer;
+    transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+  }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  .btn-primary {
+    background: var(--color-accent);
+    color: var(--color-canvas);
+  }
+  .btn-primary:hover:not(:disabled) { background: var(--color-accent-hover); }
+  .btn-primary:active:not(:disabled) { background: var(--color-accent-press); color: var(--color-ink); }
+
+  .btn-ghost {
+    background: var(--color-surface-2);
+    border-color: var(--color-hairline-strong);
+    color: var(--color-ink);
+  }
+  .btn-ghost:hover:not(:disabled) { background: var(--color-surface-3); }
+
+  .btn-danger {
+    background: color-mix(in oklab, var(--color-danger) 12%, transparent);
+    border-color: color-mix(in oklab, var(--color-danger) 35%, transparent);
+    color: var(--color-danger);
+  }
+  .btn-danger:hover:not(:disabled) {
+    background: color-mix(in oklab, var(--color-danger) 20%, transparent);
+  }
+
+  .input {
+    width: 100%;
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-hairline);
+    border-radius: 6px;
+    color: var(--color-ink);
+    padding: 0.55rem 0.85rem;
+    font-size: 14px;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .input::placeholder { color: var(--color-faint); }
+  .input:focus {
+    outline: none;
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-accent) 22%, transparent);
+  }
+}
+
+/* Scroll-reveal: JS toggles .is-in via IntersectionObserver. */
+.reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition:
+    opacity 0.6s cubic-bezier(0.2, 0.7, 0.2, 1),
+    transform 0.6s cubic-bezier(0.2, 0.7, 0.2, 1);
+  will-change: opacity, transform;
+}
+.reveal.is-in { opacity: 1; transform: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .reveal { opacity: 1; transform: none; transition: none; }
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* Sonner toast surface */
+[data-sonner-toaster] {
+  --normal-bg: var(--color-surface-2);
+  --normal-border: var(--color-hairline-strong);
+  --normal-text: var(--color-ink);
+  --success-bg: var(--color-surface-2);
+  --success-border: color-mix(in oklab, var(--color-sage) 45%, transparent);
+  --success-text: var(--color-sage);
+  --error-bg: var(--color-surface-2);
+  --error-border: color-mix(in oklab, var(--color-danger) 45%, transparent);
+  --error-text: var(--color-danger);
+  font-family: var(--font-sans);
 }

@@ -179,6 +179,21 @@ def test_analytics_requires_manager_and_shapes():
     assert isinstance(r["stale_facts"], list)
 
 
+def test_analytics_trend_series():
+    assert client.get("/analytics/trend").status_code == 401
+    r = client.get("/analytics/trend?days=7", headers=hdr()).json()
+    assert r["days"] == 7 and len(r["points"]) == 7
+    p = r["points"][-1]
+    assert {"date", "created", "approved", "findings",
+            "compliance_rate"} <= set(p)
+    assert p["date"] and p["created"] >= 0
+    # out-of-range clamps instead of failing
+    assert len(client.get("/analytics/trend?days=999",
+                          headers=hdr()).json()["points"]) == 90
+    assert client.get("/analytics/trend", headers=hdr("creator")
+                      ).status_code == 403
+
+
 def test_stale_facts_flagged():
     r = client.get("/analytics/summary", headers=hdr()).json()
     stale = r["stale_facts"]

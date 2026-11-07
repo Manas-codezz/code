@@ -19,18 +19,22 @@ page.on('pageerror', (e) => fails.push(`pageerror: ${e.message}`))
 try {
   // 1. hero landing & login
   await page.goto(BASE, { waitUntil: 'networkidle' })
-  const hasHero = await page.locator('text=BrandGuard').first().isVisible()
+  let hasHero = true
+  try {
+    await page.waitForSelector('text=BrandGuard', { timeout: 6000 })
+    hasHero = await page.locator('text=BrandGuard').first().isVisible()
+  } catch { hasHero = false }
   ok('hero landing page renders first', hasHero)
   if (await page.locator('button:has-text("Log in")').isVisible()) {
     await page.locator('button:has-text("Log in")').click()
   } else if (!page.url().includes('#/login')) {
     await page.goto(`${BASE}/#/login`, { waitUntil: 'networkidle' })
   }
-  await page.waitForSelector('text=Instant Demo Access', { timeout: 8000 })
+  await page.waitForSelector('text=Instant demo access', { timeout: 8000 })
   ok('login page renders', true)
   await page.locator('button:has-text("Manager")').click()
   await page.waitForURL(/#\/dashboard/, { timeout: 8000 })
-  await page.waitForSelector('h1:has-text("Dashboard")', { timeout: 8000 })
+  await page.waitForSelector('h1:has-text("Compliance dashboard")', { timeout: 8000 })
   ok('demo login lands on dashboard', true)
 
   // 2. dashboard data
@@ -38,22 +42,22 @@ try {
   ok('KPI row present', true)
   ok('heat map rendered', await page.locator(
      'text=Guideline-gap heat map').isVisible())
-  ok('AI advisory strip visible',
-     await page.locator('text=AI advisory').first().isVisible())
+  ok('open criticals card visible',
+     await page.locator('text=Open criticals').first().isVisible())
 
   // 3. review queue + create content
   await page.locator('a:has-text("Review queue")').click()
   await page.waitForSelector('h1:has-text("Review queue")')
-  await page.locator('button:has-text("+ New")').click()
+  await page.locator('button:has-text("New Draft")').click()
   await page.locator('input').first().fill('Smoke test copy')
   await page.locator('textarea').first().fill(
     'Act NOW! Guaranteed returns with Nova. Send $9.99 today for insights.')
-  await page.locator('button:has-text("Create & open")').click()
+  await page.locator('button:has-text("Create & Open")').click()
   await page.waitForURL(/#\/review\/\d+/, { timeout: 8000 })
   ok('content created & opened', true)
 
   // 4. run AI review (live Groq)
-  await page.locator('button:has-text("Run AI review")').click()
+  await page.locator('button:has-text("Run AI Evaluation")').click()
   await page.waitForSelector('text=Findings', { timeout: 30000 })
   await page.waitForSelector('li:has-text("critical"), li:has-text("warning")',
                              { timeout: 30000 })
@@ -68,7 +72,7 @@ try {
   // 5. approve blocked by unresolved criticals?
   const blocked = await page.locator('text=Approval blocked').count()
   const approveBtn = page.getByRole('button',
-    { name: 'Approve', exact: true })
+    { name: 'Approve Draft' })
   const disabled = await approveBtn.isDisabled()
   ok('approve gated while criticals unresolved', blocked > 0 ? disabled : true)
 
@@ -89,7 +93,7 @@ try {
   }
 
   // 7. peer comment
-  await page.locator('input[placeholder="Add a review note…"]')
+  await page.locator('input[placeholder*="Add a review note"]')
     .fill('Looks good from brand side.')
   await page.locator('button:has-text("Post")').click()
   await page.waitForSelector('text=Looks good from brand side.',

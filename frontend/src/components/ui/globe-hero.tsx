@@ -32,9 +32,9 @@ const Globe: React.FC<{
       <mesh>
         <sphereGeometry args={[radius, 64, 64]} />
         <meshBasicMaterial
-          color="#ffffff"
+          color="#a393bf"
           transparent
-          opacity={0.18}
+          opacity={0.22}
           wireframe
         />
       </mesh>
@@ -56,7 +56,7 @@ const DotGlobeHero = React.forwardRef<
     <div
       ref={ref}
       className={cn(
-        "relative w-full min-h-screen bg-[#09090b] text-white overflow-hidden selection:bg-orange-500/30 selection:text-white",
+        "relative w-full min-h-screen bg-canvas text-ink overflow-hidden selection:bg-accent/30 selection:text-white",
         className
       )}
       {...props}
@@ -69,8 +69,8 @@ const DotGlobeHero = React.forwardRef<
         <Canvas>
           <PerspectiveCamera makeDefault position={[0, 0, 3]} fov={75} />
           <ambientLight intensity={0.7} />
-          <pointLight position={[10, 10, 10]} intensity={1.5} color="#db4b16" />
-          <pointLight position={[-10, -10, -10]} intensity={0.8} color="#38bdf8" />
+          <pointLight position={[10, 10, 10]} intensity={1.5} color="#a393bf" />
+          <pointLight position={[-10, -10, -10]} intensity={0.8} color="#c3dac3" />
           
           <Globe
             rotationSpeed={rotationSpeed}

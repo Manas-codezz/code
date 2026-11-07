@@ -21,10 +21,10 @@ const KINDS: { id: Kind; label: string; fields: string[];
 ]
 
 const GLOSSARY_BADGE_STYLE: Record<string, string> = {
-  prohibited: 'bg-red-500/10 text-red-400 border-red-500/25',
-  preferred: 'bg-orange-500/10 text-orange-400 border-orange-500/25',
-  competitor: 'bg-amber-500/10 text-amber-300 border-amber-500/25',
-  approved: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/25',
+  prohibited: 'bg-danger/10 text-danger border-danger/25',
+  preferred: 'bg-accent/10 text-accent border-accent/25',
+  competitor: 'bg-warn/10 text-warn border-warn/25',
+  approved: 'bg-sage/10 text-sage border-sage/25',
 }
 
 export default function KB({ user }: { user: User }) {
@@ -78,10 +78,10 @@ export default function KB({ user }: { user: User }) {
     <div className="space-y-6">
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-white">
+          <h1 className="text-2xl font-bold tracking-tight text-ink">
             Knowledge Base
           </h1>
-          <p className="text-sm text-zinc-400 mt-1">
+          <p className="text-sm text-muted mt-1">
             Governing rules, prohibited terminology, verified factual claims, and color tokens.
           </p>
         </div>
@@ -104,19 +104,19 @@ export default function KB({ user }: { user: User }) {
       </header>
 
       {/* Tabs */}
-      <div className="flex border-b border-white/10 gap-2 overflow-x-auto pb-0.5">
+      <div className="flex border-b border-hairline gap-2 overflow-x-auto pb-0.5">
         {KINDS.map((k) => (
           <button
             key={k.id}
             onClick={() => setKind(k.id)}
             className={`px-4 py-2.5 text-xs uppercase tracking-wider font-semibold border-b-2 -mb-px transition-all duration-200 cursor-pointer flex items-center gap-2 shrink-0 ${
               kind === k.id
-                ? 'border-orange-500 text-orange-400 font-bold bg-orange-500/5'
-                : 'border-transparent text-zinc-400 hover:text-white'
+                ? 'border-accent text-accent font-bold bg-accent/5'
+                : 'border-transparent text-muted hover:text-ink'
             }`}
           >
             <span>{k.label}</span>
-            <span className="text-[11px] px-1.5 py-0.2 rounded-full bg-white/5 border border-white/10">
+            <span className="text-[11px] px-1.5 py-0.2 rounded-full bg-surface-2 border border-hairline">
               {k.id === kind ? rows.length : '·'}
             </span>
           </button>
@@ -124,19 +124,19 @@ export default function KB({ user }: { user: User }) {
       </div>
 
       {err && (
-        <div className="text-xs text-red-300 border border-red-500/30 bg-red-950/40 px-4 py-3 rounded-xl">
+        <div className="text-xs text-danger border border-danger/30 bg-danger/10 px-4 py-3 rounded-md">
           {err}
         </div>
       )}
 
       {/* Add New Entry Drawer */}
       {adding && canWrite && (
-        <div className="bg-white/[0.04] border border-white/10 p-5 rounded-2xl backdrop-blur-xl space-y-4 shadow-xl">
-          <div className="flex items-center justify-between pb-2 border-b border-white/5">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-white">
+        <div className="bg-surface-2 border border-hairline p-5 rounded-lg backdrop-blur-sm space-y-4 shadow-none">
+          <div className="flex items-center justify-between pb-2 border-b border-hairline">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-ink">
               Create New {spec.label} Entry
             </h3>
-            <span className="text-[11px] text-zinc-400">Audited change</span>
+            <span className="text-[11px] text-muted">Audited change</span>
           </div>
 
           <div className="grid md:grid-cols-2 gap-4">
@@ -152,7 +152,7 @@ export default function KB({ user }: { user: User }) {
                 ) : f === 'kind' ? (
                   <div className="relative">
                     <select
-                      className="w-full border border-white/10 bg-[#0f1117] text-zinc-100 px-3.5 py-2 text-sm rounded-lg focus:border-orange-500/80 focus:ring-1 focus:ring-orange-500/40 focus:outline-none transition-all cursor-pointer appearance-none pr-9"
+                      className="w-full border border-hairline bg-surface-2 text-ink px-3.5 py-2 text-sm rounded-lg focus:border-accent focus:ring-1 focus:ring-accent/40 focus:outline-none transition-all cursor-pointer appearance-none pr-9"
                       style={{ backgroundColor: '#0f1117', color: '#f4f4f5' }}
                       value={draft[f] ?? 'approved'}
                       onChange={(e) => setDraft({ ...draft, [f]: e.target.value })}
@@ -161,14 +161,14 @@ export default function KB({ user }: { user: User }) {
                         <option
                           key={o}
                           value={o}
-                          className="bg-[#0f1117] text-white"
+                          className="bg-surface-2 text-ink"
                           style={{ backgroundColor: '#0f1117', color: '#ffffff' }}
                         >
                           {o}
                         </option>
                       ))}
                     </select>
-                    <ChevronDown className="w-4 h-4 text-zinc-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <ChevronDown className="w-4 h-4 text-muted absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                   </div>
                 ) : (
                   <input
@@ -188,18 +188,18 @@ export default function KB({ user }: { user: User }) {
       )}
 
       {/* Entries List */}
-      <div className="bg-white/[0.03] border border-white/10 rounded-2xl divide-y divide-white/5 backdrop-blur-xl shadow-lg overflow-hidden">
+      <div className="bg-surface border border-hairline rounded-lg divide-y divide-hairline backdrop-blur-sm shadow-none overflow-hidden">
         {rows.length === 0 && (
           <div className="p-8"><Empty>No entries found in this category.</Empty></div>
         )}
         {rows.map((r) => (
           <div
             key={r.id}
-            className="px-5 py-4 flex items-start justify-between gap-4 group hover:bg-white/[0.02] transition-colors"
+            className="px-5 py-4 flex items-start justify-between gap-4 group hover:bg-surface-2 transition-colors"
           >
             {kind === 'colors' && (
               <span
-                className="w-7 h-7 rounded-lg border border-white/20 shrink-0 mt-0.5 shadow-md"
+                className="w-7 h-7 rounded-lg border border-hairline-strong shrink-0 mt-0.5 shadow-none"
                 style={{ background: String(r.hex) }}
               />
             )}
@@ -207,41 +207,41 @@ export default function KB({ user }: { user: User }) {
               <div className="text-sm break-words leading-relaxed">
                 {kind === 'guidelines' ? (
                   <>
-                    <strong className="text-white font-semibold">{String(r.title)}</strong>
-                    <span className="text-zinc-300"> — {String(r.body)}</span>
+                    <strong className="text-ink font-semibold">{String(r.title)}</strong>
+                    <span className="text-ink"> — {String(r.body)}</span>
                   </>
                 ) : kind === 'glossary' ? (
                   <div className="flex items-center gap-3 flex-wrap">
-                    <span className="font-mono text-xs font-semibold text-zinc-100 bg-white/[0.06] border border-white/15 px-2.5 py-1 rounded-md shadow-sm">
+                    <span className="font-mono text-xs font-semibold text-ink bg-surface-3 border border-hairline-strong px-2.5 py-1 rounded-md shadow-none">
                       {String(r.term)}
                     </span>
                     <Badge
-                      className={GLOSSARY_BADGE_STYLE[String(r.kind)] ?? 'bg-white/5 text-zinc-400 border-white/10'}
+                      className={GLOSSARY_BADGE_STYLE[String(r.kind)] ?? 'bg-surface-2 text-muted border-hairline'}
                     >
                       {String(r.kind)}
                     </Badge>
                     {r.note ? (
-                      <span className="text-zinc-300 text-xs"> — {String(r.note)}</span>
+                      <span className="text-ink text-xs"> — {String(r.note)}</span>
                     ) : null}
                   </div>
                 ) : kind === 'facts' ? (
                   <div>
-                    <span className="text-zinc-100 font-medium">{String(r.claim)}</span>
+                    <span className="text-ink font-medium">{String(r.claim)}</span>
                     {r.source ? (
-                      <span className="text-zinc-400 text-xs ml-2">
+                      <span className="text-muted text-xs ml-2">
                         · Source: {String(r.source)}
                       </span>
                     ) : null}
                     {r.verified_at ? (
-                      <span className="text-[11px] text-zinc-500 ml-2">
+                      <span className="text-[11px] text-faint ml-2">
                         · Verified: {String(r.verified_at)}
                       </span>
                     ) : null}
                   </div>
                 ) : (
                   <div className="flex items-center gap-2">
-                    <span className="font-mono text-white text-xs font-semibold">{String(r.hex)}</span>
-                    <span className="text-zinc-400 text-xs">· {String(r.name)}</span>
+                    <span className="font-mono text-ink text-xs font-semibold">{String(r.hex)}</span>
+                    <span className="text-muted text-xs">· {String(r.name)}</span>
                   </div>
                 )}
               </div>
@@ -249,7 +249,7 @@ export default function KB({ user }: { user: User }) {
             {canWrite && (
               <button
                 onClick={() => remove(r.id)}
-                className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-1.5 rounded text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer shrink-0"
+                className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-1.5 rounded text-faint hover:text-danger hover:bg-danger/10 transition-all cursor-pointer shrink-0"
                 title="Delete entry"
               >
                 <Trash2 className="w-4 h-4" />
@@ -259,7 +259,7 @@ export default function KB({ user }: { user: User }) {
         ))}
       </div>
 
-      <footer className="text-xs text-zinc-500 flex items-center justify-between pt-2">
+      <footer className="text-xs text-faint flex items-center justify-between pt-2">
         <span>Read access granted to all roles; modifications restricted to Manager / Admin roles.</span>
         <span>Cryptographic Audit Trail Active</span>
       </footer>

@@ -1,13 +1,17 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { loadAuth, logout, type User } from './api'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Review from './pages/Review'
 import KB from './pages/KB'
 import { BrandLogo } from './components/ui/BrandLogo'
+import { Toaster } from 'sonner'
+import {
+  ArrowRight, BookOpen, Command, FileCheck2, LayoutDashboard, LogOut,
+  Menu, Search, X,
+} from 'lucide-react'
 
 const DotGlobeHeroDemo = lazy(() => import('./components/ui/demo'))
-import { BookOpen, FileCheck2, LayoutDashboard, LogOut } from 'lucide-react'
 
 type Route = 'hero' | 'login' | 'dashboard' | 'review' | 'kb'
 
@@ -33,12 +37,42 @@ export const ROLE_RANK: Record<User['role'], number> = {
   creator: 0, reviewer: 1, manager: 2, admin: 3,
 }
 
+function NavLink({ n, active, onClick }: {
+  n: (typeof NAV)[number]
+  active: boolean
+  onClick?: () => void
+}) {
+  const Icon = n.icon
+  return (
+    <a
+      href={`#/${n.id}`}
+      onClick={onClick}
+      aria-current={active ? 'page' : undefined}
+      className={`flex items-center gap-3 min-h-10 px-3 py-2.5 text-[13px] rounded-md border transition-colors ${
+        active
+          ? 'bg-accent/12 text-accent border-accent/30 font-semibold'
+          : 'text-muted border-transparent hover:text-ink hover:bg-surface-2'
+      }`}
+    >
+      <Icon className="w-4 h-4" strokeWidth={1.75} />
+      <span>{n.label}</span>
+    </a>
+  )
+}
+
 export default function App() {
   const [user, setUser] = useState<User | null>(() => loadAuth()?.user ?? null)
   const [path, setPath] = useState(() => parseHash(Boolean(user)))
+  const [navOpen, setNavOpen] = useState(false)
+  const [cmdOpen, setCmdOpen] = useState(false)
+  const [q, setQ] = useState('')
+  const searchRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    const on = () => setPath(parseHash(Boolean(user)))
+    const on = () => {
+      setPath(parseHash(Boolean(user)))
+      setNavOpen(false)
+    }
     addEventListener('hashchange', on)
     return () => removeEventListener('hashchange', on)
   }, [user])
@@ -50,10 +84,59 @@ export default function App() {
     }
   }, [user, path.route])
 
-  // Public Hero Landing page
+  // Cmd/Ctrl+K opens the command palette; Esc closes overlays.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        setCmdOpen((v) => !v)
+      }
+      if (e.key === 'Escape') {
+        setCmdOpen(false)
+        setNavOpen(false)
+      }
+    }
+    addEventListener('keydown', onKey)
+    return () => removeEventListener('keydown', onKey)
+  }, [])
+
+  useEffect(() => {
+    if (cmdOpen) {
+      setQ('')
+      requestAnimationFrame(() => searchRef.current?.focus())
+    }
+  }, [cmdOpen])
+
+  const commands = useMemo(() => {
+    const base = NAV.map((n) => ({
+      id: n.id as string,
+      label: n.label,
+      hint: `Go to ${n.label}`,
+      run: () => { location.hash = `#/${n.id}`; setCmdOpen(false) },
+    }))
+    return [
+      ...base,
+      {
+        id: 'hero',
+        label: 'Landing page',
+        hint: 'View the public site',
+        run: () => { location.hash = '#/hero'; setCmdOpen(false) },
+      },
+      {
+        id: 'signout',
+        label: 'Sign out',
+        hint: 'End this session',
+        run: () => { logout(); setUser(null); setCmdOpen(false) },
+      },
+    ]
+  }, [])
+
+  const filtered = commands.filter((c) =>
+    (c.label + ' ' + c.hint).toLowerCase().includes(q.toLowerCase()))
+
   if (path.route === 'hero') {
     return (
-      <Suspense fallback={<div className="min-h-screen bg-[#030712]" />}>
+      <Suspense fallback={<div className="min-h-screen bg-canvas" />}>
         <DotGlobeHeroDemo
           onLogin={() => {
             location.hash = '#/login'
@@ -68,119 +151,214 @@ export default function App() {
     )
   }
 
-  // Login page
   if (path.route === 'login' || !user) {
     return (
-      <Login
-        onLogin={(u) => {
-          setUser(u)
-          location.hash = '#/dashboard'
-          setPath({ route: 'dashboard', arg: '' })
-        }}
-      />
+      <>
+        <Login
+          onLogin={(u) => {
+            setUser(u)
+            location.hash = '#/dashboard'
+            setPath({ route: 'dashboard', arg: '' })
+          }}
+        />
+        <Toaster theme="dark" position="bottom-right" />
+      </>
     )
   }
 
-  return (
-    <div className="min-h-screen flex bg-[#09090b] text-zinc-100 selection:bg-orange-500/30 selection:text-white">
-      {/* Left Rail Sidebar */}
-      <aside className="w-60 shrink-0 border-r border-white/10 bg-[#0c0d12]/95 backdrop-blur-xl flex flex-col fixed inset-y-0 left-0 z-30">
-        {/* Brand Header */}
-        <div className="px-5 py-5 border-b border-white/10 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <BrandLogo className="w-7 h-7" />
-            <div>
-              <span className="font-bold tracking-tight text-white text-sm block leading-none">
-                BrandGuard
-              </span>
-              <span className="text-[10px] text-zinc-500 font-mono tracking-wider">
-                COMPLIANCE AI
-              </span>
-            </div>
-          </div>
-          <span className="text-[10px] font-medium text-orange-400 bg-orange-500/10 px-2 py-0.5 rounded border border-orange-500/20">
-            PRO
+  const rail = (
+    <>
+      <div className="px-5 py-5 border-b border-hairline flex items-center justify-between">
+        <a href="#/dashboard" className="flex items-center gap-3">
+          <BrandLogo className="w-7 h-7" />
+          <span>
+            <span className="block text-sm font-bold tracking-tight text-ink leading-none">
+              BrandGuard
+            </span>
+            <span className="block text-[10px] text-faint font-mono tracking-wider mt-1">
+              COMPLIANCE AI
+            </span>
           </span>
-        </div>
+        </a>
+        <span className="text-[10px] font-semibold text-accent bg-accent/12 px-2 py-0.5 rounded border border-accent/25">
+          PRO
+        </span>
+      </div>
 
-        {/* Navigation Items with Subtle Modern Icons */}
-        <nav className="flex-1 py-4 space-y-1 px-3">
-          {NAV.map((n) => {
-            const active = path.route === n.id
-            const Icon = n.icon
-            return (
-              <a
-                key={n.id}
-                href={`#/${n.id}`}
-                className={`flex items-center gap-3 px-3 py-2.5 text-xs font-medium rounded-xl transition-all duration-200 group ${
-                  active
-                    ? 'bg-orange-500/15 text-white font-semibold border border-orange-500/30 shadow-[0_0_15px_rgba(249,115,22,0.12)]'
-                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.04]'
-                }`}
-              >
-                <Icon
-                  className={`w-4 h-4 transition-colors ${
-                    active ? 'text-orange-400' : 'text-zinc-500 group-hover:text-zinc-300'
-                  }`}
-                  strokeWidth={1.75}
-                />
-                <span>{n.label}</span>
-              </a>
-            )
-          })}
-        </nav>
+      <nav className="flex-1 py-4 space-y-1 px-3" aria-label="Primary">
+        {NAV.map((n) => (
+          <NavLink key={n.id} n={n} active={path.route === n.id}
+                   onClick={() => setNavOpen(false)} />
+        ))}
+      </nav>
 
-        {/* User Card */}
-        <div className="p-4 border-t border-white/10 bg-white/[0.01]">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-white/[0.06] border border-white/10 flex items-center justify-center font-bold text-xs text-orange-400">
-              {user.email.slice(0, 1).toUpperCase()}
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="text-xs truncate font-medium text-white">{user.email}</div>
-              <div className="text-[10px] text-zinc-400 flex items-center gap-1.5 capitalize mt-0.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                {user.role} · {user.team}
-              </div>
+      <div className="p-4 border-t border-hairline">
+        <button
+          onClick={() => setCmdOpen(true)}
+          className="mb-3 w-full flex items-center gap-2 px-3 py-2 text-xs text-muted
+            bg-surface-2 border border-hairline rounded-md hover:text-ink
+            hover:border-hairline-strong transition-colors cursor-pointer"
+        >
+          <Search className="w-3.5 h-3.5" />
+          <span className="flex-1 text-left">Jump to…</span>
+          <kbd className="font-mono text-[10px] text-faint border border-hairline-strong px-1.5 py-0.5 rounded">
+            ⌘K
+          </kbd>
+        </button>
+
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-md bg-surface-3 border border-hairline-strong flex items-center justify-center font-bold text-xs text-accent">
+            {user.email.slice(0, 1).toUpperCase()}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-xs truncate font-medium text-ink">{user.email}</div>
+            <div className="text-[10px] text-muted flex items-center gap-1.5 capitalize mt-0.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-sage" />
+              {user.role} · {user.team}
             </div>
           </div>
-          <button
-            onClick={() => {
-              logout()
-              setUser(null)
-              location.hash = '#/hero'
-              setPath({ route: 'hero', arg: '' })
-            }}
-            className="mt-3 w-full flex items-center justify-center gap-2 py-1.5 text-xs text-zinc-400 hover:text-orange-400 hover:bg-white/[0.04] rounded-lg border border-white/5 transition-colors cursor-pointer"
-          >
-            <LogOut className="w-3.5 h-3.5" />
-            <span>Sign out</span>
-          </button>
         </div>
+        <button
+          onClick={() => {
+            logout()
+            setUser(null)
+            location.hash = '#/hero'
+            setPath({ route: 'hero', arg: '' })
+          }}
+          className="mt-3 w-full flex items-center justify-center gap-2 py-1.5 text-xs
+            text-muted hover:text-danger hover:bg-danger/10 rounded-md border
+            border-hairline transition-colors cursor-pointer"
+        >
+          <LogOut className="w-3.5 h-3.5" />
+          <span>Sign out</span>
+        </button>
+      </div>
+    </>
+  )
+
+  return (
+    <div className="min-h-screen bg-canvas text-ink">
+      <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:z-50
+        focus:top-3 focus:left-3 btn btn-primary">Skip to content</a>
+
+      {/* Desktop rail */}
+      <aside className="hidden lg:flex w-60 shrink-0 border-r border-hairline
+        bg-surface flex-col fixed inset-y-0 left-0 z-30">
+        {rail}
       </aside>
 
-      {/* Main Content Area */}
-      <div className="flex-1 ml-60 min-w-0 bg-gradient-to-b from-[#030712] via-[#09090b] to-[#050508] min-h-screen">
-        {/* Top AI Advisory Strip */}
-        <div className="border-b border-white/10 bg-[#0c0d12]/80 backdrop-blur-md px-6 py-2.5 flex items-center justify-between text-xs text-zinc-400 sticky top-0 z-20">
-          <div className="flex items-center gap-2.5">
-            <span className="w-2 h-2 rounded-full bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.8)] inline-block" />
-            <span>
-              <strong className="text-zinc-200 font-semibold">AI Advisory Active</strong>
-              {' — Automated rule evaluation active; final approval requires human signoff.'}
+      {/* Mobile drawer */}
+      {navOpen && (
+        <div className="lg:hidden fixed inset-0 z-40">
+          <div className="absolute inset-0 bg-black/60" onClick={() => setNavOpen(false)} />
+          <aside className="absolute inset-y-0 left-0 w-72 max-w-[85vw] bg-surface
+            border-r border-hairline flex flex-col">
+            <button
+              onClick={() => setNavOpen(false)}
+              aria-label="Close navigation"
+              className="absolute top-4 right-4 p-2 min-w-10 min-h-10 grid place-items-center text-muted hover:text-ink rounded-md hover:bg-surface-2 cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+            {rail}
+          </aside>
+        </div>
+      )}
+
+      <div className="lg:ml-60 min-w-0 min-h-screen flex flex-col">
+        {/* Top strip */}
+        <div className="border-b border-hairline bg-surface px-4 sm:px-6 py-2.5
+          flex items-center justify-between gap-3 sticky top-0 z-20">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <button
+              onClick={() => setNavOpen(true)}
+              aria-label="Open navigation"
+              className="lg:hidden p-2 -ml-1 min-w-10 min-h-10 grid place-items-center text-muted hover:text-ink rounded-md hover:bg-surface-2 cursor-pointer"
+            >
+              <Menu className="w-4 h-4" />
+            </button>
+            <span className="w-2 h-2 rounded-full bg-sage inline-block shrink-0" />
+            <span className="text-xs text-muted truncate">
+              <strong className="text-ink font-semibold">AI advisory active</strong>
+              <span className="hidden sm:inline"> — automated rules run; a human always signs off.</span>
             </span>
           </div>
-          <div className="text-[11px] text-zinc-500 font-mono hidden sm:block">
-            ENGINE V1.0 · GROQ LLM
+          <div className="flex items-center gap-3 shrink-0">
+            <button
+              onClick={() => setCmdOpen(true)}
+              aria-label="Open command palette"
+              className="p-2 min-w-10 min-h-10 grid place-items-center text-muted hover:text-ink rounded-md hover:bg-surface-2 cursor-pointer"
+            >
+              <Command className="w-4 h-4" />
+            </button>
+            <span className="text-[11px] text-faint font-mono hidden sm:block">
+              V1.0 · GROQ
+            </span>
           </div>
         </div>
 
-        <main className="px-6 py-8 max-w-7xl mx-auto">
+        <main id="main" className="px-4 sm:px-6 py-6 sm:py-8 max-w-7xl w-full mx-auto flex-1">
           {path.route === 'dashboard' && <Dashboard />}
           {path.route === 'review' && <Review key={path.arg || 'list'} selected={path.arg} />}
           {path.route === 'kb' && <KB user={user} />}
         </main>
+
+        <footer className="border-t border-hairline px-6 py-4 text-[11px] text-faint
+          flex flex-wrap items-center justify-between gap-2">
+          <span>Advisory findings · human sign-off · tamper-evident audit trail</span>
+          <span className="font-mono">BrandGuard AI · v1.0</span>
+        </footer>
       </div>
+
+      {/* Command palette */}
+      {cmdOpen && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center px-4 pt-[12vh]"
+             role="dialog" aria-modal="true" aria-label="Command palette">
+          <div className="absolute inset-0 bg-black/65" onClick={() => setCmdOpen(false)} />
+          <div className="relative w-full max-w-lg bg-surface border border-hairline-strong
+            rounded-lg shadow-xl overflow-hidden">
+            <div className="flex items-center gap-3 px-4 border-b border-hairline">
+              <Search className="w-4 h-4 text-faint shrink-0" />
+              <input
+                ref={searchRef}
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && filtered[0]) filtered[0].run()
+                }}
+                placeholder="Jump to a page or action…"
+                aria-label="Search commands"
+                className="w-full bg-transparent py-3.5 text-sm text-ink
+                  placeholder:text-faint focus:outline-none"
+              />
+              <kbd className="font-mono text-[10px] text-faint border border-hairline-strong
+                px-1.5 py-0.5 rounded shrink-0">ESC</kbd>
+            </div>
+            <ul className="max-h-72 overflow-y-auto py-2">
+              {filtered.length === 0 && (
+                <li className="px-4 py-6 text-sm text-muted text-center">No matches.</li>
+              )}
+              {filtered.map((c, i) => (
+                <li key={c.id}>
+                  <button
+                    onClick={c.run}
+                    className={`w-full flex items-center gap-3 px-4 py-2.5 text-left
+                      text-sm transition-colors cursor-pointer ${
+                        i === 0 ? 'bg-surface-2 text-ink' : 'text-muted hover:bg-surface-2 hover:text-ink'
+                      }`}
+                  >
+                    <ArrowRight className="w-3.5 h-3.5 text-accent shrink-0" />
+                    <span className="flex-1">{c.label}</span>
+                    <span className="text-[11px] text-faint">{c.hint}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+
+      <Toaster theme="dark" position="bottom-right" />
     </div>
   )
 }
