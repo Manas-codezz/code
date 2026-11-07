@@ -1,6 +1,81 @@
-"""SQLite access — stdlib only, no ORM. Path comes from settings (deploy-safe)."""
+"""Database access — SQLite locally, Postgres (Supabase) in production.
+
+Set DATABASE_URL (postgres://…) to use Postgres; otherwise the SQLite file
+from settings.database_path is used. The same SQL works on both: the
+Postgres adapter rewrites `?` placeholders and returns dict rows.
+"""
 import sqlite3
 from .settings import settings
+
+
+def is_postgres() -> bool:
+    return settings.database_url.strip().lower().startswith(
+        ("postgres://", "postgresql://"))
+
+
+def _ph(sql: str) -> str:
+    """SQLite-style ? placeholders -> psycopg %s."""
+    return sql.replace("?", "%s")
+
+
+def pg_schema() -> str:
+    """SQLite DDL translated to Postgres."""
+    return (SCHEMA
+            .replace("INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY")
+            .replace("datetime('now')",
+                     "to_char(now(), 'YYYY-MM-DD HH24:MI:SS')"))
+
+
+class _PGCursor:
+    def __init__(self, cur):
+        self._cur = cur
+
+    def fetchone(self):
+        return self._cur.fetchone()
+
+    def fetchall(self):
+        return self._cur.fetchall()
+
+
+class _PGConnection:
+    """Minimal DB-API facade so the SQLite-era call sites stay unchanged."""
+
+    def __init__(self):
+        import psycopg
+        from psycopg.rows import dict_row
+        url = settings.database_url.strip()
+        if url.startswith("postgres://"):
+            url = "postgresql://" + url[len("postgres://"):]
+        self._conn = psycopg.connect(url, row_factory=dict_row)
+
+    def execute(self, sql: str, args: tuple = ()):
+        cur = self._conn.cursor()
+        cur.execute(_ph(sql), tuple(args) if args else None)
+        return _PGCursor(cur)
+
+    def executemany(self, sql: str, seq):
+        cur = self._conn.cursor()
+        cur.executemany(_ph(sql), seq)
+        return _PGCursor(cur)
+
+    def executescript(self, script: str):
+        for stmt in script.split(";"):
+            if stmt.strip():
+                self._conn.cursor().execute(stmt)
+
+    def commit(self):
+        self._conn.commit()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if exc_type is None:
+            self._conn.commit()
+        else:
+            self._conn.rollback()
+        self._conn.close()
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS content (
@@ -117,7 +192,9 @@ CREATE INDEX IF NOT EXISTS idx_comment_content ON comment(content_id);
 """
 
 
-def get() -> sqlite3.Connection:
+def get():
+    if is_postgres():
+        return _PGConnection()
     from pathlib import Path
     Path(settings.database_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(settings.database_path)
@@ -154,6 +231,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
 
 
 def init() -> None:
+    if is_postgres():
+        with get() as conn:
+            conn.executescript(pg_schema())
+            conn.commit()
+        return
     with get() as conn:
         conn.executescript(SCHEMA)
         _migrate(conn)

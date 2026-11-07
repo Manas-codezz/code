@@ -120,13 +120,14 @@ def add_comment(cid: int, body: CommentBody,
                 raise HTTPException(404, "parent comment not found")
         cur = conn.execute(
             "INSERT INTO comment (content_id, parent_id, author, body) "
-            "VALUES (?,?,?,?)",
+            "VALUES (?,?,?,?) RETURNING id",
             (cid, body.parent_id, user["email"], body.body.strip()))
+        new_id = cur.fetchone()["id"]
         db.log_audit(conn, cid, user["email"], "comment",
                      body.body.strip()[:200])
         conn.commit()
         return db.one(conn, "SELECT * FROM comment WHERE id=?",
-                      (cur.lastrowid,))
+                      (new_id,))
 
 
 @router.patch("/comments/{iid}")

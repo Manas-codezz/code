@@ -5,6 +5,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from collections import defaultdict, deque
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -182,12 +183,13 @@ def create_user(body: UserCreate, _: dict = Depends(
             raise HTTPException(409, "email already registered")
         cur = conn.execute(
             "INSERT INTO user (email, password_hash, role, team) "
-            "VALUES (?,?,?,?)",
+            "VALUES (?,?,?,?) RETURNING id",
             (body.email.lower().strip(), auth.hash_password(body.password),
              body.role, body.team))
+        new_id = cur.fetchone()["id"]
         conn.commit()
         row = db.one(conn, "SELECT id, email, role, team FROM user "
-                           "WHERE id=?", (cur.lastrowid,))
+                           "WHERE id=?", (new_id,))
     return row
 
 
@@ -235,12 +237,13 @@ def create_content(body: ContentCreate,
     with db.get() as conn:
         cur = conn.execute(
             "INSERT INTO content (type, title, text, channel, created_by,"
-            " team) VALUES (?,?,?,?,?,?)",
+            " team) VALUES (?,?,?,?,?,?) RETURNING id",
             (body.type, body.title, body.text, body.channel,
              user["email"], user.get("team") or "marketing"))
+        new_id = cur.fetchone()["id"]
         conn.commit()
         row = db.one(conn, "SELECT * FROM content WHERE id=?",
-                     (cur.lastrowid,))
+                     (new_id,))
     return row
 
 
@@ -302,10 +305,13 @@ def run_review(cid: int, request: Request, force_mock: bool = False,
                 (cid, f.category, f.severity, f.rule, f.excerpt,
                  f.suggestion, f.confidence, f.evidence))
         # SLA timer: review window starts at submission
+        due = (datetime.now(timezone.utc)
+               + timedelta(hours=settings.sla_hours)
+               ).strftime("%Y-%m-%d %H:%M:%S")
         conn.execute(
-            "UPDATE content SET status='review', sla_due_at="
-            "datetime('now', ?) WHERE id=? AND status='draft'",
-            (f"+{settings.sla_hours} hours", cid))
+            "UPDATE content SET status='review', sla_due_at=?"
+            " WHERE id=? AND status='draft'",
+            (due, cid))
         db.log_audit(conn, cid, user["email"], "review",
                      f"{len(findings)} findings ({provider}), {latency}ms",
                      tokens)
@@ -399,9 +405,9 @@ def analytics(user: dict = Depends(require_role("manager"))):
 
         by_cat = db.rows(conn, """
             SELECT category, COUNT(*) count,
-                   SUM(severity='critical')   critical,
-                   SUM(severity='warning')    warning,
-                   SUM(severity='suggestion') suggestion
+                   SUM(CASE WHEN severity='critical' THEN 1 ELSE 0 END)   critical,
+                   SUM(CASE WHEN severity='warning' THEN 1 ELSE 0 END)    warning,
+                   SUM(CASE WHEN severity='suggestion' THEN 1 ELSE 0 END) suggestion
             FROM finding GROUP BY category ORDER BY count DESC""")
         rules = db.rows(conn, """
             SELECT rule, COUNT(*) count FROM finding
@@ -418,13 +424,15 @@ def analytics(user: dict = Depends(require_role("manager"))):
         team_rows = db.rows(conn, """
             SELECT c.team,
                    COUNT(*) total,
-                   SUM(c.status='approved') approved,
-                   SUM(c.status IN ('draft','review','peer_review')) pending
+                   SUM(CASE WHEN c.status='approved' THEN 1 ELSE 0 END) approved,
+                   SUM(CASE WHEN c.status IN ('draft','review','peer_review')
+                            THEN 1 ELSE 0 END) pending
             FROM content c GROUP BY c.team""")
         team_find = {
             r["team"]: r for r in db.rows(conn, """
                 SELECT c.team, COUNT(f.id) findings,
-                       COALESCE(SUM(f.severity='critical'),0) criticals
+                       COALESCE(SUM(CASE WHEN f.severity='critical'
+                                         THEN 1 ELSE 0 END),0) criticals
                 FROM content c LEFT JOIN finding f ON f.content_id=c.id
                 GROUP BY c.team""")}
         by_team = []
@@ -447,28 +455,37 @@ def analytics(user: dict = Depends(require_role("manager"))):
             for c in ("tone", "term", "claim", "a11y", "visual")
             for s in ("critical", "warning", "suggestion")]
 
-        # --- overdue: in review past SLA ---
-        overdue = db.rows(conn, """
-            SELECT id, title, status, sla_due_at,
-                   CAST(ROUND((julianday('now') - julianday(sla_due_at))
-                       * 24) AS INT) hours_late
-            FROM content
-            WHERE sla_due_at IS NOT NULL
-              AND status IN ('review','peer_review')
-              AND julianday(sla_due_at) < julianday('now')
-            ORDER BY sla_due_at""")
-        # hours_late can come back negative-int cast on NULL; drop nulls
-        overdue = [o for o in overdue if o["hours_late"] is not None]
+        # --- overdue: in review past SLA (portable: computed in Python) ---
+        now = datetime.now(timezone.utc)
+        overdue = []
+        for r in db.rows(conn, "SELECT id, title, status, sla_due_at "
+                               "FROM content WHERE sla_due_at IS NOT NULL "
+                               "AND status IN ('review','peer_review')"):
+            try:
+                due = datetime.fromisoformat(r["sla_due_at"])
+            except (TypeError, ValueError):
+                continue
+            if due.tzinfo is None:
+                due = due.replace(tzinfo=timezone.utc)
+            if due < now:
+                overdue.append({**r, "hours_late":
+                                round((now - due).total_seconds() / 3600)})
+        overdue.sort(key=lambda o: o["sla_due_at"])
 
         # --- stale facts: verified > 90 days ago ---
-        stale = db.rows(conn, """
-            SELECT id, claim, source, verified_at,
-                   CAST(ROUND(julianday('now') - julianday(verified_at))
-                       AS INT) days_old
-            FROM fact
-            WHERE verified_at IS NOT NULL
-              AND julianday('now') - julianday(verified_at) > 90
-            ORDER BY days_old DESC""")
+        stale = []
+        for r in db.rows(conn, "SELECT id, claim, source, verified_at "
+                               "FROM fact WHERE verified_at IS NOT NULL"):
+            try:
+                v = datetime.fromisoformat(r["verified_at"])
+            except (TypeError, ValueError):
+                continue
+            if v.tzinfo is None:
+                v = v.replace(tzinfo=timezone.utc)
+            days_old = round((now - v).total_seconds() / 86400)
+            if days_old > 90:
+                stale.append({**r, "days_old": days_old})
+        stale.sort(key=lambda s: s["days_old"], reverse=True)
 
     # compliance = approved content with zero unresolved criticals
     compliant = approved
@@ -488,31 +505,30 @@ def analytics_trend(days: int = 30,
                     user: dict = Depends(require_role("manager"))):
     """Daily created/approved/findings series for the compliance chart."""
     days = max(7, min(days, 90))
+    today = datetime.now(timezone.utc).date()
+    start = today - timedelta(days=days - 1)
+    start_s = start.isoformat()
     with db.get() as conn:
-        rows = db.rows(conn, """
-            WITH RECURSIVE d(day) AS (
-              SELECT date('now', ?)
-              UNION ALL
-              SELECT date(day, '+1 day') FROM d WHERE day < date('now')
-            )
-            SELECT d.day AS date,
-              (SELECT COUNT(*) FROM content c
-                 WHERE date(c.created_at) = d.day) created,
-              (SELECT COUNT(*) FROM content c
-                 WHERE date(c.created_at) = d.day
-                   AND c.status IN ('approved','published')) approved,
-              (SELECT COUNT(*) FROM finding f
-                 WHERE date(f.created_at) = d.day) findings
-            FROM d ORDER BY d.day""", (f"-{days - 1} days",))
+        created = {r["d"]: r["n"] for r in db.rows(conn,
+            "SELECT substr(created_at,1,10) d, COUNT(*) n FROM content "
+            "WHERE substr(created_at,1,10) >= ? GROUP BY d", (start_s,))}
+        approved = {r["d"]: r["n"] for r in db.rows(conn,
+            "SELECT substr(created_at,1,10) d, COUNT(*) n FROM content "
+            "WHERE substr(created_at,1,10) >= ? "
+            "AND status IN ('approved','published') GROUP BY d", (start_s,))}
+        found = {r["d"]: r["n"] for r in db.rows(conn,
+            "SELECT substr(created_at,1,10) d, COUNT(*) n FROM finding "
+            "WHERE substr(created_at,1,10) >= ? GROUP BY d", (start_s,))}
     points = []
-    for r in rows:
-        created = r["created"] or 0
-        approved = r["approved"] or 0
+    for i in range(days):
+        d = (start + timedelta(days=i)).isoformat()
+        created_n = created.get(d, 0)
+        approved_n = approved.get(d, 0)
         points.append(TrendPoint(
-            date=r["date"], created=created, approved=approved,
-            findings=r["findings"] or 0,
-            compliance_rate=round(approved / created * 100, 1)
-            if created else 0.0))
+            date=d, created=created_n, approved=approved_n,
+            findings=found.get(d, 0),
+            compliance_rate=round(approved_n / created_n * 100, 1)
+            if created_n else 0.0))
     return TrendResponse(days=days, points=points)
 
 
