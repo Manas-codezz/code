@@ -106,6 +106,10 @@ export default function AutoSpotlightTour({
   onSwitchRole,
 }: AutoSpotlightTourProps) {
   const [stepIndex, setStepIndex] = useState(() => {
+    const isHero = typeof window !== 'undefined' && (
+      window.location.hash.replace(/^#\/?/, '').split('/')[0] === 'hero' || window.location.hash === ''
+    )
+    if (isHero) return 0
     const saved = sessionStorage.getItem('brandguard_tour_step')
     return saved ? parseInt(saved, 10) || 0 : 0
   })
@@ -118,7 +122,27 @@ export default function AutoSpotlightTour({
     sessionStorage.setItem('brandguard_tour_step', String(idx))
   }
 
-  // Track target selector position
+  // When tour becomes active on the hero page, always restart at step 0
+  useEffect(() => {
+    const isHero = typeof window !== 'undefined' && (
+      window.location.hash.replace(/^#\/?/, '').split('/')[0] === 'hero' || window.location.hash === ''
+    )
+    if (isActive && isHero) {
+      setStepIndex(0)
+      sessionStorage.setItem('brandguard_tour_step', '0')
+    }
+  }, [isActive])
+
+  // Scroll target into view once when step changes
+  useEffect(() => {
+    if (!isActive || !currentStep.targetSelector) return
+    const el = document.querySelector(currentStep.targetSelector)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  }, [isActive, stepIndex, currentStep])
+
+  // Track target selector position on resize, scroll, and interval
   useEffect(() => {
     if (!isActive) {
       setHighlightRect(null)
@@ -132,21 +156,16 @@ export default function AutoSpotlightTour({
       }
       const el = document.querySelector(currentStep.targetSelector)
       if (el) {
-        const rect = el.getBoundingClientRect()
-        setHighlightRect(rect)
-        // Scroll target into view if outside
-        if (rect.top < 0 || rect.bottom > window.innerHeight) {
-          el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-        }
+        setHighlightRect(el.getBoundingClientRect())
       } else {
         setHighlightRect(null)
       }
     }
 
     updateRect()
-    const interval = setInterval(updateRect, 400)
-    window.addEventListener('resize', updateRect)
-    window.addEventListener('scroll', updateRect)
+    const interval = setInterval(updateRect, 200)
+    window.addEventListener('resize', updateRect, { passive: true })
+    window.addEventListener('scroll', updateRect, { passive: true })
 
     return () => {
       clearInterval(interval)
@@ -154,6 +173,19 @@ export default function AutoSpotlightTour({
       window.removeEventListener('scroll', updateRect)
     }
   }, [isActive, currentStep, stepIndex])
+
+  // Advance step automatically if user directly navigates to the next step's route
+  useEffect(() => {
+    if (!isActive) return
+    const handleHash = () => {
+      const h = window.location.hash
+      if (h.includes('login') && stepIndex === 0) {
+        updateStep(1)
+      }
+    }
+    window.addEventListener('hashchange', handleHash)
+    return () => window.removeEventListener('hashchange', handleHash)
+  }, [isActive, stepIndex])
 
   if (!isActive) return null
 
@@ -186,28 +218,62 @@ export default function AutoSpotlightTour({
     }
   }
 
-  return (
-    <div className="fixed inset-0 z-[9999] pointer-events-auto">
-      {/* 
-        Full-Screen Backdrop Shield:
-        Clicks are blocked everywhere except clicking "Skip" or using the Tour card.
-      */}
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px] transition-all duration-300" />
+  // Calculate cutout hole dimensions with padding around highlighted element
+  const pad = 8
+  const x1 = highlightRect ? Math.max(0, Math.floor(highlightRect.left - pad)) : 0
+  const y1 = highlightRect ? Math.max(0, Math.floor(highlightRect.top - pad)) : 0
+  const x2 = highlightRect ? Math.min(window.innerWidth, Math.ceil(highlightRect.right + pad)) : 0
+  const y2 = highlightRect ? Math.min(window.innerHeight, Math.ceil(highlightRect.bottom + pad)) : 0
+  const w = Math.max(0, x2 - x1)
+  const h = Math.max(0, y2 - y1)
+  const r = Math.min(10, Math.max(0, w / 4), Math.max(0, h / 4))
 
-      {/* Cutout Spotlight on Target Element */}
+  // Inverted polygon cutout via evenodd fill rule:
+  // Outer viewport rectangle + inner highlighted element hole.
+  // The backdrop blur and tint render strictly OUTSIDE this hole,
+  // leaving the highlighted content 100% crisp, clear, and unblurred.
+  const clipPathStyle = highlightRect
+    ? `polygon(evenodd, 0px 0px, 100vw 0px, 100vw 100vh, 0px 100vh, 0px 0px, ${x1 + r}px ${y1}px, ${x2 - r}px ${y1}px, ${x2}px ${y1 + r}px, ${x2}px ${y2 - r}px, ${x2 - r}px ${y2}px, ${x1 + r}px ${y2}px, ${x1}px ${y2 - r}px, ${x1}px ${y1 + r}px, ${x1 + r}px ${y1}px)`
+    : undefined
+
+  // Position tour card so it never overlaps the highlighted target
+  const cardInBottomRight = Boolean(highlightRect && y2 > window.innerHeight - 360 && x2 > window.innerWidth - 480)
+  const cardPlacementStyle: React.CSSProperties = cardInBottomRight
+    ? { top: '24px', right: '24px' }
+    : { bottom: '24px', right: '24px' }
+
+  return (
+    <div className="fixed inset-0 z-[9999] pointer-events-none">
+      {/* 
+        Full-Screen Backdrop Shield with Cutout Hole:
+        The cutout hole leaves the targeted element 100% sharp and crystal clear
+        while the entire surrounding page is dimmed and blurred.
+        Pointer-events-auto ensures clicks outside the cutout are caught by the backdrop,
+        while clicks inside the cutout pass directly through to the highlighted element.
+      */}
+      <div
+        className="fixed inset-0 bg-black/65 backdrop-blur-[4px] pointer-events-auto transition-[clip-path] duration-200"
+        style={{
+          clipPath: clipPathStyle,
+          WebkitClipPath: clipPathStyle,
+        }}
+      />
+
+      {/* Spotlight Border and Ping Pill over Target Element */}
       {highlightRect && (
         <div
-          className="absolute rounded-lg ring-4 ring-accent ring-offset-4 ring-offset-canvas pointer-events-none transition-all duration-300 z-[10000] shadow-[0_0_50px_rgba(163,147,191,0.5)]"
+          className="fixed pointer-events-none rounded-xl border-2 border-accent shadow-[0_0_0_1px_rgba(163,147,191,0.3),0_0_30px_rgba(163,147,191,0.45)] z-[10000] transition-all duration-150"
           style={{
-            top: `${Math.max(0, highlightRect.top - 4)}px`,
-            left: `${Math.max(0, highlightRect.left - 4)}px`,
-            width: `${highlightRect.width + 8}px`,
-            height: `${highlightRect.height + 8}px`,
+            top: `${y1}px`,
+            left: `${x1}px`,
+            width: `${w}px`,
+            height: `${h}px`,
           }}
         >
-          <div className="absolute -top-3 -right-3 flex h-6 w-6">
+          {/* Step badge on top-right of highlighted box */}
+          <div className="absolute -top-3.5 -right-3.5 flex h-7 w-7 items-center justify-center">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75" />
-            <span className="relative inline-flex rounded-full h-6 w-6 bg-accent text-canvas font-bold text-[10px] items-center justify-center">
+            <span className="relative inline-flex rounded-full h-7 w-7 bg-accent text-canvas font-bold text-xs items-center justify-center shadow-lg border border-white/20">
               {stepIndex + 1}
             </span>
           </div>
@@ -216,11 +282,8 @@ export default function AutoSpotlightTour({
 
       {/* Floating Guided Tour Card */}
       <div
-        className="fixed z-[10001] max-w-md w-full bg-surface border border-hairline-strong rounded-xl shadow-2xl p-5 text-ink transition-all duration-300"
-        style={{
-          bottom: '24px',
-          right: '24px',
-        }}
+        className="fixed z-[10001] pointer-events-auto max-w-md w-full bg-surface border border-hairline-strong rounded-xl shadow-2xl p-5 text-ink transition-all duration-300"
+        style={cardPlacementStyle}
       >
         {/* Top Header */}
         <div className="flex items-center justify-between pb-3 border-b border-hairline">

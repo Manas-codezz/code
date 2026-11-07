@@ -69,8 +69,9 @@ export default function App() {
   const [cmdOpen, setCmdOpen] = useState(false)
   const [tourOpen, setTourOpen] = useState(false)
   const [autoTourActive, setAutoTourActive] = useState(() => {
-    // Automatically launch when user lands on hero or app if not previously dismissed
-    return !localStorage.getItem('brandguard_autotour_dismissed')
+    // Automatically launch when user lands on hero
+    const initialRoute = parseHash(Boolean(loadAuth()?.user)).route
+    return initialRoute === 'hero'
   })
   const [q, setQ] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)
@@ -98,12 +99,32 @@ export default function App() {
 
   useEffect(() => {
     const on = () => {
-      setPath(parseHash(Boolean(user)))
+      const nextPath = parseHash(Boolean(user))
+      setPath(nextPath)
       setNavOpen(false)
+      if (nextPath.route === 'hero') {
+        sessionStorage.setItem('brandguard_tour_step', '0')
+        setAutoTourActive(true)
+      }
     }
     addEventListener('hashchange', on)
     return () => removeEventListener('hashchange', on)
   }, [user])
+
+  // Whenever user arrives on the home page (hero), launch the tour from step 1
+  useEffect(() => {
+    if (path.route === 'hero') {
+      sessionStorage.setItem('brandguard_tour_step', '0')
+      setAutoTourActive(true)
+    }
+  }, [path.route])
+
+  // Clear any legacy permanent dismissal key so it doesn't suppress the tour
+  useEffect(() => {
+    try {
+      localStorage.removeItem('brandguard_autotour_dismissed')
+    } catch {}
+  }, [])
 
   // Route protection: if guest tries to visit internal routes, route them to login
   useEffect(() => {
@@ -195,7 +216,7 @@ export default function App() {
           isActive={autoTourActive}
           onClose={() => {
             setAutoTourActive(false)
-            localStorage.setItem('brandguard_autotour_dismissed', 'true')
+            sessionStorage.removeItem('brandguard_tour_step')
           }}
           onSwitchRole={handleSwitchRole}
         />
@@ -219,7 +240,7 @@ export default function App() {
           isActive={autoTourActive}
           onClose={() => {
             setAutoTourActive(false)
-            localStorage.setItem('brandguard_autotour_dismissed', 'true')
+            sessionStorage.removeItem('brandguard_tour_step')
           }}
           onSwitchRole={handleSwitchRole}
         />
@@ -448,7 +469,7 @@ export default function App() {
         isActive={autoTourActive}
         onClose={() => {
           setAutoTourActive(false)
-          localStorage.setItem('brandguard_autotour_dismissed', 'true')
+          sessionStorage.removeItem('brandguard_tour_step')
         }}
         onSwitchRole={handleSwitchRole}
       />
