@@ -11,8 +11,30 @@
   --color-warning: #a16207;
   --color-suggestion: #57534e;
   --color-ok: #15803d;
+
+  /* shadcn color tokens mapped to BrandGuard palette */
+  --color-background: #faf9f6;
+  --color-foreground: #16130f;
+  --color-primary: #db4b16;
+  --color-primary-foreground: #ffffff;
+  --color-muted: #f0ece6;
+  --color-muted-foreground: #6b6560;
+  --color-border: #e7e3dc;
+
   --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+:root {
+  --background: 36 25% 97%;
+  --foreground: 30 18% 7%;
+  --primary: 16 82% 47%;
+  --primary-foreground: 0 0% 100%;
+  --muted: 33 17% 91%;
+  --muted-foreground: 27 6% 40%;
+  --border: 37 20% 89%;
+  --accent: 16 82% 47%;
+  --accent-foreground: 0 0% 100%;
 }
 
 html {
