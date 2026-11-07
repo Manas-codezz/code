@@ -5,7 +5,7 @@ import {
 } from 'lucide-react'
 import { loadAuth } from '@/api'
 import { BrandLogo } from '@/components/ui/BrandLogo'
-import { AsciiWorkflow } from '@/components/ui/AsciiWorkflow'
+import { AsciiArt } from '@/components/ui/lol'
 
 export interface DotGlobeHeroDemoProps {
   onLogin?: () => void
@@ -144,8 +144,10 @@ export default function DotGlobeHeroDemo({ onLogin, onSignUp }: DotGlobeHeroDemo
               </p>
             </div>
 
-            {/* ASCII live-session workflow */}
-            <AsciiWorkflow />
+            {/* Animated ASCII art panel */}
+            <div className="relative h-[340px] lg:h-[400px] overflow-hidden rounded-lg border border-hairline bg-surface">
+              <AsciiArt className="absolute inset-0" />
+            </div>
           </div>
         </div>
       </section>
