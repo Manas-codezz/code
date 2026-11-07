@@ -42,13 +42,14 @@ function Kpi({ label, value, sub, tone, icon: Icon, spark, sparkTone }: {
   )
 }
 
-function Section({ title, right, children }: {
+function Section({ title, right, children, tourId }: {
   title: string
   right?: React.ReactNode
   children: React.ReactNode
+  tourId?: string
 }) {
   return (
-    <section className="card overflow-hidden">
+    <section data-tour={tourId} className="card overflow-hidden">
       <header className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 border-b border-hairline">
         <h2 className="text-xs font-semibold uppercase tracking-wider text-ink">{title}</h2>
         {right}
@@ -279,7 +280,7 @@ function ManagerDashboard() {
         </div>
       </header>
 
-      <div data-tour="audit-panel" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div data-tour="kpi-grid" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Kpi label="Compliance rate" value={`${d.compliance_rate}%`}
              sub={`${d.approved} of ${d.total_content} drafts approved`}
              tone="text-sage" icon={TrendingUp}
@@ -314,7 +315,7 @@ function ManagerDashboard() {
 
       {tab === 'overview' && (
         <div className="space-y-5">
-          <Section title="Compliance trend"
+          <Section tourId="chart-trend" title="Compliance trend"
                    right={<span className="text-[11px] text-faint">last {days} days</span>}>
             {!trend ? (
               <Skeleton className="h-[240px] w-full" />
@@ -326,7 +327,7 @@ function ManagerDashboard() {
           </Section>
 
           <div className="grid lg:grid-cols-2 gap-5">
-            <Section title="Guideline-gap heat map"
+            <Section tourId="chart-heatmap" title="Guideline-gap heat map"
                      right={<span className="text-[11px] text-faint">category × severity</span>}>
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">
@@ -365,7 +366,7 @@ function ManagerDashboard() {
               </div>
             </Section>
 
-            <Section title="Findings by category"
+            <Section tourId="chart-categories" title="Findings by category"
                      right={<span className="text-[11px] text-faint">all time</span>}>
               {d.by_category.length === 0 ? (
                 <Empty>No findings recorded.</Empty>

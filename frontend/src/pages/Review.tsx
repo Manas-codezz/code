@@ -331,10 +331,11 @@ export default function Review({ selected, user }: { selected: string; user: Use
               ))}
             </div>
 
-            <Btn kind="primary" onClick={() => setShowCreate((s) => !s)}>
+            <Btn kind="primary" onClick={() => setShowCreate((s) => !s)}
+                 data-tour="new-submission-btn">
               <span className="flex items-center gap-1.5">
                 {showCreate ? <X className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
-                <span>{showCreate ? 'Close Form' : 'New Draft'}</span>
+                <span>{showCreate ? 'Close Form' : 'New Submission'}</span>
               </span>
             </Btn>
           </div>
@@ -342,7 +343,7 @@ export default function Review({ selected, user }: { selected: string; user: Use
 
         {/* Expandable New Draft Form */}
         {showCreate && (
-          <div className="p-6 border-b border-hairline bg-surface-2 space-y-4">
+          <div data-tour="create-form" className="p-6 border-b border-hairline bg-surface-2 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-semibold uppercase tracking-wider text-ink">
                 Submit New Copy for Compliance Evaluation
@@ -400,6 +401,7 @@ export default function Review({ selected, user }: { selected: string; user: Use
               <Btn
                 kind="primary"
                 onClick={create}
+                data-tour="create-open-btn"
                 disabled={busy === 'create' || !draft.title || !draft.text}
               >
                 {busy === 'create' ? 'Creating…' : 'Create & Open'}
@@ -429,11 +431,12 @@ export default function Review({ selected, user }: { selected: string; user: Use
                   </td>
                 </tr>
               )}
-              {visible.map((c) => {
+              {visible.map((c, idx) => {
                 const isSelected = cid === c.id
                 return (
                   <tr
                     key={c.id}
+                    data-tour={idx === 0 ? 'review-queue-row' : undefined}
                     onClick={() => { location.hash = `#/review/${c.id}` }}
                     className={`transition-all duration-200 cursor-pointer ${
                       isSelected
@@ -551,7 +554,7 @@ export default function Review({ selected, user }: { selected: string; user: Use
                     </span>
                   </Btn>
                   {canManage && (
-                    <>
+                    <div data-tour="manager-actions" className="flex items-center gap-2.5 flex-wrap">
                   <Btn
                     kind="primary"
                     onClick={approve}
@@ -579,7 +582,7 @@ export default function Review({ selected, user }: { selected: string; user: Use
                   >
                     Request Changes
                   </Btn>
-                    </>
+                    </div>
                   )}
                 </div>
               </div>
@@ -873,9 +876,10 @@ export default function Review({ selected, user }: { selected: string; user: Use
                   )}
 
                   <ul className="divide-y divide-hairline">
-                    {findings.map((f) => (
+                    {findings.map((f, idx) => (
                       <li
                         key={f.id}
+                        data-tour={idx === 0 ? 'finding-first' : undefined}
                         className={`p-5 transition-opacity ${f.accepted === 2 ? 'opacity-40' : ''}`}
                       >
                         <div className="flex flex-col sm:flex-row items-start gap-4">

@@ -82,6 +82,28 @@ def test_creator_cannot_manage_and_admin_creates_users():
     assert made.status_code == 201 and made.json()["role"] == "reviewer"
 
 
+def test_admin_user_management():
+    # list is admin-only
+    assert client.get("/auth/users", headers=hdr("manager")).status_code == 403
+    listed = client.get("/auth/users", headers=hdr("admin"))
+    assert listed.status_code == 200 and len(listed.json()) >= 4
+    # create with any role, then patch the role
+    made = client.post("/auth/users", headers=hdr("admin"), json={
+        "email": "mgd@brandguard.demo", "password": "longenough2",
+        "role": "reviewer"}).json()
+    patched = client.patch(f"/auth/users/{made['id']}", headers=hdr("admin"),
+                           json={"role": "manager"})
+    assert patched.status_code == 200 and patched.json()["role"] == "manager"
+    # invalid role rejected, self-demotion blocked, delete works
+    assert client.patch(f"/auth/users/{made['id']}", headers=hdr("admin"),
+                        json={"role": "owner"}).status_code == 422
+    admin_id = client.get("/auth/me", headers=hdr("admin")).json()["id"]
+    assert client.patch(f"/auth/users/{admin_id}", headers=hdr("admin"),
+                        json={"role": "creator"}).status_code == 409
+    assert client.delete(f"/auth/users/{made['id']}",
+                         headers=hdr("admin")).status_code == 204
+
+
 # --- content + review ------------------------------------------------------
 def test_seeded_content_exists():
     assert len(client.get("/content", headers=hdr()).json()) >= 3

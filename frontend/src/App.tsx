@@ -100,6 +100,13 @@ export default function App() {
     }
   }
 
+  const handleSignOut = () => {
+    logout()
+    setUser(null)
+    location.hash = '#/login'
+    setPath({ route: 'login', arg: '' })
+  }
+
   useEffect(() => {
     const on = () => {
       const nextPath = parseHash(Boolean(user))
@@ -133,6 +140,9 @@ export default function App() {
   useEffect(() => {
     if (!user && path.route !== 'login' && path.route !== 'hero') {
       location.hash = '#/login'
+    }
+    if (user && path.route === 'admin' && user.role !== 'admin') {
+      location.hash = '#/dashboard'
     }
   }, [user, path.route])
 
@@ -222,6 +232,7 @@ export default function App() {
             sessionStorage.removeItem('brandguard_tour_step')
           }}
           onSwitchRole={handleSwitchRole}
+          onSignOut={handleSignOut}
         />
         <Toaster theme="dark" position="top-right" />
       </>
@@ -246,6 +257,7 @@ export default function App() {
             sessionStorage.removeItem('brandguard_tour_step')
           }}
           onSwitchRole={handleSwitchRole}
+          onSignOut={handleSignOut}
         />
         <RoleTourGuide
           currentUser={user}
@@ -476,6 +488,7 @@ export default function App() {
           sessionStorage.removeItem('brandguard_tour_step')
         }}
         onSwitchRole={handleSwitchRole}
+        onSignOut={handleSignOut}
       />
 
       <Toaster theme="dark" position="top-right" />
