@@ -36,7 +36,7 @@ export default function Login({ onLogin }: { onLogin: (u: User) => void }) {
       {/* Background radial glows matching hero page */}
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(219,75,22,0.18),rgba(255,255,255,0))] pointer-events-none" />
       <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-orange-600/10 rounded-full blur-[140px] pointer-events-none" />
-      <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-blue-600/10 rounded-full blur-[130px] pointer-events-none" />
+      <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-orange-600/10 rounded-full blur-[130px] pointer-events-none" />
 
       {/* Top Header Bar */}
       <header className="w-full max-w-5xl flex items-center justify-between z-10 pt-2 pb-6">
@@ -171,7 +171,7 @@ export default function Login({ onLogin }: { onLogin: (u: User) => void }) {
       <footer className="w-full max-w-5xl z-10 pt-6 pb-2 text-center text-xs text-zinc-500 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-white/5">
         <div className="flex items-center gap-2">
           <ShieldCheck className="w-4 h-4 text-orange-400/80" />
-          <span>Advisory findings with human signoff · SOC 2 compliance ready</span>
+          <span>Advisory findings with human signoff</span>
         </div>
         <div className="flex gap-4 text-zinc-400">
           <a href="#/hero" className="hover:text-white transition-colors">Overview</a>

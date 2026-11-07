@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { api, msg, type Analytics } from '../api'
+import { api, loadAuth, msg, type Analytics, type Content, type User } from '../api'
 import { Bar, Badge, Empty, StatusChip } from '../ui'
-import { AlertCircle, AlertTriangle, CheckCircle2, Cpu, TrendingUp } from 'lucide-react'
+import { AlertCircle, AlertTriangle, CheckCircle2, Cpu, FileText, TrendingUp } from 'lucide-react'
 
 const CATS = ['tone', 'term', 'claim', 'a11y', 'visual']
 const SEVS = ['critical', 'warning', 'suggestion']
@@ -71,7 +71,99 @@ function heatStyle(count: number, max: number, sev: string) {
   }
 }
 
+function PersonalDashboard({ user }: { user: User }) {
+  const [rows, setRows] = useState<Content[] | null>(null)
+  const [err, setErr] = useState('')
+
+  useEffect(() => {
+    api<Content[]>('/content').then(setRows).catch((e) => setErr(msg(e)))
+  }, [])
+
+  if (err) return <div className="text-red-400 text-sm p-4 bg-red-950/30 rounded-xl border border-red-500/20">{err}</div>
+  if (!rows) {
+    return (
+      <div className="flex items-center justify-center py-20 text-sm text-zinc-400 gap-3">
+        <span className="w-5 h-5 border-2 border-orange-500/30 border-t-orange-500 rounded-full animate-spin" />
+        <span>Loading your workspace…</span>
+      </div>
+    )
+  }
+
+  // Creators see their own submissions; reviewers see the whole queue.
+  const mine = user.role === 'creator'
+    ? rows.filter((r) => r.created_by === user.email)
+    : rows
+  const approved = mine.filter((r) => r.status === 'approved' || r.status === 'published').length
+  const pending = mine.filter((r) => ['draft', 'review', 'peer_review'].includes(r.status)).length
+  const changes = mine.filter((r) => r.status === 'changes').length
+  const rate = mine.length ? Math.round((approved / mine.length) * 100) : 0
+
+  return (
+    <div className="space-y-6">
+      <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-white">Your Workspace</h1>
+          <p className="text-sm text-zinc-400 mt-1">
+            {user.role === 'creator'
+              ? 'Your submissions and their review status.'
+              : 'Content awaiting your review and its current status.'}
+          </p>
+        </div>
+        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/[0.04] border border-white/10 text-xs text-zinc-400 capitalize">
+          <span className="w-2 h-2 rounded-full bg-orange-400 shadow-[0_0_8px_rgba(251,146,60,0.8)]" />
+          {user.role}
+        </div>
+      </header>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Kpi label="Submissions" value={String(mine.length)} sub="In your scope" icon={FileText} />
+        <Kpi label="Approved" value={String(approved)} sub={`${rate}% approval rate`} tone="text-emerald-400" icon={CheckCircle2} />
+        <Kpi label="Awaiting Review" value={String(pending)} sub="Pending a decision" tone={pending ? 'text-amber-400' : 'text-zinc-200'} icon={AlertTriangle} />
+        <Kpi label="Changes Requested" value={String(changes)} sub="Needs edits" tone={changes ? 'text-red-400' : 'text-zinc-200'} icon={AlertCircle} />
+      </div>
+
+      <Section title="Content">
+        {mine.length === 0 ? (
+          <Empty>No content in your scope yet.</Empty>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-zinc-400 uppercase tracking-wider text-[11px] border-b border-white/10">
+                  <th className="pb-2.5 text-left font-semibold">Title</th>
+                  <th className="pb-2.5 text-left font-semibold">Channel</th>
+                  <th className="pb-2.5 text-left font-semibold">Author</th>
+                  <th className="pb-2.5 text-right font-semibold">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {mine.slice(0, 25).map((r) => (
+                  <tr key={r.id} className="hover:bg-white/[0.02] transition-colors">
+                    <td className="py-3 font-semibold text-white max-w-[22rem] truncate">{r.title}</td>
+                    <td className="py-3 text-zinc-300 capitalize">{r.channel}</td>
+                    <td className="py-3 text-zinc-400">{r.created_by}</td>
+                    <td className="py-3 text-right"><StatusChip status={r.status} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Section>
+    </div>
+  )
+}
+
 export default function Dashboard() {
+  const user = loadAuth()?.user
+  if (!user) return null
+  if (user.role !== 'manager' && user.role !== 'admin') {
+    return <PersonalDashboard user={user} />
+  }
+  return <ManagerDashboard />
+}
+
+function ManagerDashboard() {
   const [d, setD] = useState<Analytics | null>(null)
   const [err, setErr] = useState('')
 

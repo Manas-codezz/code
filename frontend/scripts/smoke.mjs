@@ -26,7 +26,7 @@ try {
   } else if (!page.url().includes('#/login')) {
     await page.goto(`${BASE}/#/login`, { waitUntil: 'networkidle' })
   }
-  await page.waitForSelector('text=Demo accounts', { timeout: 8000 })
+  await page.waitForSelector('text=Instant Demo Access', { timeout: 8000 })
   ok('login page renders', true)
   await page.locator('button:has-text("Manager")').click()
   await page.waitForURL(/#\/dashboard/, { timeout: 8000 })

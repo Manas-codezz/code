@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { loadAuth, logout, type User } from './api'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Review from './pages/Review'
 import KB from './pages/KB'
-import DotGlobeHeroDemo from './components/ui/demo'
 import { BrandLogo } from './components/ui/BrandLogo'
+
+const DotGlobeHeroDemo = lazy(() => import('./components/ui/demo'))
 import { BookOpen, FileCheck2, LayoutDashboard, LogOut } from 'lucide-react'
 
 type Route = 'hero' | 'login' | 'dashboard' | 'review' | 'kb'
@@ -52,16 +53,18 @@ export default function App() {
   // Public Hero Landing page
   if (path.route === 'hero') {
     return (
-      <DotGlobeHeroDemo
-        onLogin={() => {
-          location.hash = '#/login'
-          setPath({ route: 'login', arg: '' })
-        }}
-        onSignUp={() => {
-          location.hash = '#/login'
-          setPath({ route: 'login', arg: '' })
-        }}
-      />
+      <Suspense fallback={<div className="min-h-screen bg-[#030712]" />}>
+        <DotGlobeHeroDemo
+          onLogin={() => {
+            location.hash = '#/login'
+            setPath({ route: 'login', arg: '' })
+          }}
+          onSignUp={() => {
+            location.hash = '#/login'
+            setPath({ route: 'login', arg: '' })
+          }}
+        />
+      </Suspense>
     )
   }
 

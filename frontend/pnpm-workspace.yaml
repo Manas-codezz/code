@@ -1,2 +1,4 @@
 minimumReleaseAgeExclude:
   - vite@8.3.6
+  - framer-motion@14.10.1
+  - motion-dom@14.10.1

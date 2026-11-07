@@ -33,7 +33,7 @@ export default function DotGlobeHeroDemo({ onLogin, onSignUp }: DotGlobeHeroDemo
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(219,75,22,0.18),rgba(255,255,255,0))]" />
       <div className="absolute inset-0 bg-gradient-to-t from-[#09090b] via-transparent to-[#030712]/70" />
       <div className="absolute top-1/4 left-1/4 w-[32rem] h-[32rem] bg-orange-600/10 rounded-full blur-[140px] pointer-events-none" />
-      <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-blue-600/10 rounded-full blur-[120px] pointer-events-none" />
+      <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-orange-600/10 rounded-full blur-[120px] pointer-events-none" />
 
       {/* Top Floating Nav Bar */}
       <header className="absolute top-0 inset-x-0 z-20 flex items-center justify-between px-6 sm:px-12 py-6 max-w-7xl mx-auto w-full">
