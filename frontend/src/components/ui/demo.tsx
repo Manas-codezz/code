@@ -103,52 +103,50 @@ export default function DotGlobeHeroDemo({ onLogin, onSignUp }: DotGlobeHeroDemo
       </header>
 
       {/* HERO */}
-      <section className="bg-canvas min-h-screen">
-        <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 pt-28 pb-24">
-          <div className="grid lg:grid-cols-[1.1fr_0.9fr] gap-12 items-center">
-            <div className="text-center lg:text-left">
-              <span className="reveal inline-flex items-center gap-2 px-3 py-1.5 rounded-md
-                bg-surface-2 border border-hairline text-[11px] font-semibold uppercase
-                tracking-wider text-accent">
-                <Sparkles className="w-3.5 h-3.5" />
-                Autonomous brand governance
-              </span>
+      <section className="relative bg-canvas min-h-screen flex items-center justify-center overflow-hidden">
+        {/* Full-screen ASCII background behind hero text */}
+        <div className="absolute inset-0 z-0 pointer-events-none opacity-45 mix-blend-screen overflow-hidden">
+          <AsciiArt className="w-full h-full object-cover" />
+          <div className="absolute inset-0 bg-gradient-to-b from-canvas/70 via-canvas/30 to-canvas" />
+          <div className="absolute inset-0 bg-radial-gradient from-transparent via-canvas/50 to-canvas" />
+        </div>
 
-              <h1 className="reveal font-serif text-5xl sm:text-6xl xl:text-7xl leading-[0.98]
-                tracking-tight mt-6" style={{ transitionDelay: '60ms' }}>
-                Brand integrity,
-                <br />
-                <em className="italic text-accent">governed</em> end to end.
-              </h1>
+        <div className="relative z-10 w-full max-w-4xl mx-auto px-4 sm:px-6 pt-28 pb-24 text-center">
+          <span className="reveal inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full
+            bg-surface-2/90 backdrop-blur-md border border-hairline-strong text-[11px] font-semibold uppercase
+            tracking-wider text-accent shadow-sm">
+            <Sparkles className="w-3.5 h-3.5" />
+            Autonomous brand governance
+          </span>
 
-              <p className="reveal text-muted text-base sm:text-lg leading-relaxed
-                max-w-xl mx-auto lg:mx-0 mt-6" style={{ transitionDelay: '120ms' }}>
-                Review every draft against your knowledge base — with evidence,
-                SLA timers, human sign-off and a tamper-evident audit trail.
-              </p>
+          <h1 className="reveal font-serif text-5xl sm:text-6xl md:text-7xl xl:text-8xl leading-[0.98]
+            tracking-tight mt-6" style={{ transitionDelay: '60ms' }}>
+            Brand integrity,
+            <br />
+            <em className="italic text-accent">governed</em> end to end.
+          </h1>
 
-              <div className="reveal flex flex-col sm:flex-row gap-3 justify-center lg:justify-start mt-8"
-                   style={{ transitionDelay: '180ms' }}>
-                <button onClick={handleSignUp} className="btn btn-primary px-5 py-3 text-sm">
-                  <UserPlus className="w-4 h-4" />
-                  Try a demo role
-                  <ArrowRight className="w-4 h-4" />
-                </button>
-                <a href="#how" className="btn btn-ghost px-5 py-3 text-sm">
-                  See how it works
-                </a>
-              </div>
+          <p className="reveal text-muted sm:text-ink/80 text-base sm:text-lg md:text-xl leading-relaxed
+            max-w-2xl mx-auto mt-6" style={{ transitionDelay: '120ms' }}>
+            Review every draft against your knowledge base — with evidence,
+            SLA timers, human sign-off and a tamper-evident audit trail.
+          </p>
 
-              <p className="reveal text-xs text-faint mt-6" style={{ transitionDelay: '240ms' }}>
-                Advisory AI findings · human-in-the-loop approvals · hash-chained audit
-              </p>
-            </div>
-
-            {/* Animated ASCII art panel */}
-            <div className="relative h-[340px] lg:h-[400px] overflow-hidden rounded-lg border border-hairline bg-surface">
-              <AsciiArt className="absolute inset-0" />
-            </div>
+          <div className="reveal flex flex-col sm:flex-row gap-3.5 justify-center items-center mt-9"
+               style={{ transitionDelay: '180ms' }}>
+            <button onClick={handleSignUp} className="btn btn-primary px-6 py-3.5 text-sm shadow-md">
+              <UserPlus className="w-4 h-4" />
+              Try a demo role
+              <ArrowRight className="w-4 h-4" />
+            </button>
+            <a href="#how" className="btn btn-ghost px-6 py-3.5 text-sm backdrop-blur-sm bg-surface-2/50 border border-hairline">
+              See how it works
+            </a>
           </div>
+
+          <p className="reveal text-xs text-faint mt-8" style={{ transitionDelay: '240ms' }}>
+            Advisory AI findings · human-in-the-loop approvals · hash-chained audit
+          </p>
         </div>
       </section>
 
