@@ -34,7 +34,7 @@ def _make_reviewed(text: str = "Guaranteed returns! Act now! $5.00") -> int:
                        headers=hdr("creator")).json()
     for f in body["findings"]:
         client.patch(f"/findings/{f['id']}", json={"accepted": 1},
-                     headers=hdr("creator"))
+                     headers=hdr("reviewer"))
     return cid
 
 

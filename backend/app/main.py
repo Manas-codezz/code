@@ -19,7 +19,7 @@ from . import db
 from .settings import settings
 from .models import (ContentCreate, ContentOut, ContentWithFindings, Finding,
                       FindingPatch, ReviewResult, AnalyticsSummary,
-                      CategoryCount, TeamScore)
+                      CategoryCount, TeamScore, TrendPoint, TrendResponse)
 from .engine import review as engine, a11y, visual, compliance
 from . import seed, auth
 from .auth import current_user, require_role
@@ -284,7 +284,7 @@ def run_review(cid: int, request: Request, force_mock: bool = False,
 
 @app.patch("/findings/{fid}", response_model=Finding)
 def patch_finding(fid: int, body: FindingPatch,
-                  user: dict = Depends(current_user)):
+                  user: dict = Depends(require_role("reviewer"))):
     with db.get() as conn:
         row = db.one(conn, "SELECT * FROM finding WHERE id=?", (fid,))
         if not row:
@@ -444,6 +444,39 @@ def analytics(user: dict = Depends(require_role("manager"))):
         llm_calls=cost.get("calls", 0), total_tokens=cost.get("tok", 0),
         by_team=by_team, heat_map=heat_map,
         overdue_reviews=overdue, stale_facts=stale)
+
+
+@app.get("/analytics/trend", response_model=TrendResponse)
+def analytics_trend(days: int = 30,
+                    user: dict = Depends(require_role("manager"))):
+    """Daily created/approved/findings series for the compliance chart."""
+    days = max(7, min(days, 90))
+    with db.get() as conn:
+        rows = db.rows(conn, """
+            WITH RECURSIVE d(day) AS (
+              SELECT date('now', ?)
+              UNION ALL
+              SELECT date(day, '+1 day') FROM d WHERE day < date('now')
+            )
+            SELECT d.day AS date,
+              (SELECT COUNT(*) FROM content c
+                 WHERE date(c.created_at) = d.day) created,
+              (SELECT COUNT(*) FROM content c
+                 WHERE date(c.created_at) = d.day
+                   AND c.status IN ('approved','published')) approved,
+              (SELECT COUNT(*) FROM finding f
+                 WHERE date(f.created_at) = d.day) findings
+            FROM d ORDER BY d.day""", (f"-{days - 1} days",))
+    points = []
+    for r in rows:
+        created = r["created"] or 0
+        approved = r["approved"] or 0
+        points.append(TrendPoint(
+            date=r["date"], created=created, approved=approved,
+            findings=r["findings"] or 0,
+            compliance_rate=round(approved / created * 100, 1)
+            if created else 0.0))
+    return TrendResponse(days=days, points=points)
 
 
 # ---------- uploads (image content) ----------

@@ -78,6 +78,19 @@ class TeamScore(BaseModel):
     compliance_rate: float
 
 
+class TrendPoint(BaseModel):
+    date: str
+    created: int
+    approved: int
+    findings: int
+    compliance_rate: float
+
+
+class TrendResponse(BaseModel):
+    days: int
+    points: list[TrendPoint] = []
+
+
 class AnalyticsSummary(BaseModel):
     total_content: int
     approved: int

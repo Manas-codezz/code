@@ -45,8 +45,20 @@ export interface ReviewResult {
   tokens: number
 }
 
-export interface Analytics {
-  total_content: number
+export interface TrendPoint {
+  date: string
+  created: number
+  approved: number
+  findings: number
+  compliance_rate: number
+}
+
+export interface TrendResponse {
+  days: number
+  points: TrendPoint[]
+}
+
+export interface Analytics {  total_content: number
   approved: number
   pending: number
   compliance_rate: number

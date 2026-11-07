@@ -150,9 +150,24 @@ def test_accept_then_approve():
                        headers=hdr()).json()
     for f in body["findings"]:
         client.patch(f"/findings/{f['id']}", json={"accepted": 1},
-                     headers=hdr("creator"))
+                     headers=hdr("reviewer"))
     r = client.post(f"/content/{cid}/approve", headers=hdr())
     assert r.status_code == 200 and r.json()["status"] == "approved"
+
+
+def test_creator_cannot_triage_findings():
+    cid = client.post("/content", headers=hdr("creator"), json={
+        "type": "email", "title": "rbac",
+        "text": "Guaranteed returns! Act now! $5.00", "channel": "email"
+    }).json()["id"]
+    findings = client.post(f"/content/{cid}/review?force_mock=true",
+                           headers=hdr("creator")).json()["findings"]
+    assert findings
+    fid = findings[0]["id"]
+    assert client.patch(f"/findings/{fid}", json={"accepted": 1},
+                        headers=hdr("creator")).status_code == 403
+    assert client.patch(f"/findings/{fid}", json={"accepted": 1},
+                        headers=hdr("reviewer")).status_code == 200
 
 
 def test_request_changes_flow():
@@ -177,6 +192,21 @@ def test_analytics_requires_manager_and_shapes():
                for h in r["heat_map"])
     assert isinstance(r["overdue_reviews"], list)
     assert isinstance(r["stale_facts"], list)
+
+
+def test_analytics_trend_series():
+    assert client.get("/analytics/trend").status_code == 401
+    r = client.get("/analytics/trend?days=7", headers=hdr()).json()
+    assert r["days"] == 7 and len(r["points"]) == 7
+    p = r["points"][-1]
+    assert {"date", "created", "approved", "findings",
+            "compliance_rate"} <= set(p)
+    assert p["date"] and p["created"] >= 0
+    # out-of-range clamps instead of failing
+    assert len(client.get("/analytics/trend?days=999",
+                          headers=hdr()).json()["points"]) == 90
+    assert client.get("/analytics/trend", headers=hdr("creator")
+                      ).status_code == 403
 
 
 def test_stale_facts_flagged():

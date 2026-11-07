@@ -1,17 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, msg, type Content, type Finding, type ReviewResult } from '../api'
+import { useCallback, useEffect, useState } from 'react'
+import { api, msg, type Content, type Finding, type ReviewResult, type User } from '../api'
+import { ROLE_RANK } from '../App'
 import {
   Badge, Btn, Empty, Field, SeverityBadge, StatusChip, inputCls,
 } from '../ui'
 import {
   AlertCircle,
   ArrowDown,
+  ArrowLeft,
   Check,
   CheckCircle2,
   ChevronDown,
   Clock,
   Cpu,
-  FileText,
   History,
   MessageSquare,
   Plus,
@@ -34,7 +35,10 @@ interface Diff {
 
 const SEV_ORDER = { critical: 0, warning: 1, suggestion: 2 }
 
-export default function Review({ selected }: { selected: string }) {
+export default function Review({ selected, user }: { selected: string; user: User }) {
+  const rank = ROLE_RANK[user.role]
+  const canReview = rank >= ROLE_RANK.reviewer
+  const canManage = rank >= ROLE_RANK.manager
   const [list, setList] = useState<Content[]>([])
   const [filter, setFilter] = useState('')
   const [detail, setDetail] = useState<Content | null>(null)
@@ -49,7 +53,6 @@ export default function Review({ selected }: { selected: string }) {
     { title: '', text: '', channel: 'web', type: 'text' })
   const [comment, setComment] = useState('')
 
-  const workspaceRef = useRef<HTMLDivElement>(null)
   const cid = Number(selected) || 0
 
   const loadList = useCallback(() => {
@@ -151,35 +154,37 @@ export default function Review({ selected }: { selected: string }) {
 
   return (
     <div className="space-y-8 w-full">
+      {!cid && (
+      <>
       {/* =========================================================================
           SECTION 1: FULL-PAGE REVIEW QUEUE (Top Table View)
       ========================================================================= */}
-      <section className="bg-white/[0.03] border border-white/10 rounded-2xl backdrop-blur-xl shadow-xl overflow-hidden">
+      <section className="bg-surface border border-hairline rounded-lg backdrop-blur-sm shadow-none overflow-hidden">
         {/* Queue Header & Filters */}
-        <div className="p-6 border-b border-white/10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="p-6 border-b border-hairline flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-3">
-              <h1 className="text-xl font-bold tracking-tight text-white">Review Queue</h1>
-              <span className="text-xs px-2.5 py-0.5 rounded-full bg-white/5 border border-white/10 text-zinc-400 font-mono">
+              <h1 className="text-xl font-bold tracking-tight text-ink">Review Queue</h1>
+              <span className="text-xs px-2.5 py-0.5 rounded-full bg-surface-2 border border-hairline text-muted font-mono">
                 {list.length} Total Drafts
               </span>
             </div>
-            <p className="text-xs text-zinc-400 mt-1">
-              Select any copy draft from the queue to inspect compliance findings and run AI evaluations below.
+            <p className="text-xs text-muted mt-1">
+              Select any draft to open its compliance evaluation workspace.
             </p>
           </div>
 
           <div className="flex items-center gap-3 flex-wrap">
             {/* Filter Pills */}
-            <div className="flex gap-1 bg-white/[0.02] border border-white/10 p-1 rounded-xl">
+            <div className="flex gap-1 bg-surface-2 border border-hairline p-1 rounded-md">
               {['', 'draft', 'review', 'changes', 'approved'].map((s) => (
                 <button
                   key={s || 'all'}
                   onClick={() => setFilter(s)}
                   className={`text-[11px] px-3 py-1 rounded-lg uppercase tracking-wider font-semibold transition-all duration-200 cursor-pointer ${
                     filter === s
-                      ? 'bg-orange-500/20 text-orange-400 font-bold border border-orange-500/40 shadow-[0_0_10px_rgba(249,115,22,0.15)]'
-                      : 'text-zinc-400 hover:text-white'
+                      ? 'bg-accent/20 text-accent font-bold border border-accent/40 shadow-[0_0_10px_rgba(249,115,22,0.15)]'
+                      : 'text-muted hover:text-ink'
                   }`}
                 >
                   {s || 'all'}
@@ -198,12 +203,12 @@ export default function Review({ selected }: { selected: string }) {
 
         {/* Expandable New Draft Form */}
         {showCreate && (
-          <div className="p-6 border-b border-white/10 bg-white/[0.02] space-y-4">
+          <div className="p-6 border-b border-hairline bg-surface-2 space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-white">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-ink">
                 Submit New Copy for Compliance Evaluation
               </h3>
-              <span className="text-xs text-zinc-500">Auto-routes to reviewer queue</span>
+              <span className="text-xs text-faint">Auto-routes to reviewer queue</span>
             </div>
             <div className="grid md:grid-cols-2 gap-4">
               <Field label="Draft Title">
@@ -226,17 +231,17 @@ export default function Review({ selected }: { selected: string }) {
                 <Field label="Type">
                   <div className="relative">
                     <select
-                      className="w-full border border-white/10 bg-[#0f1117] text-zinc-100 px-3.5 py-2 text-sm rounded-lg focus:border-orange-500/80 focus:ring-1 focus:ring-orange-500/40 focus:outline-none transition-all cursor-pointer appearance-none pr-9"
+                      className="w-full border border-hairline bg-surface-2 text-ink px-3.5 py-2 text-sm rounded-lg focus:border-accent focus:ring-1 focus:ring-accent/40 focus:outline-none transition-all cursor-pointer appearance-none pr-9"
                       style={{ backgroundColor: '#0f1117', color: '#f4f4f5' }}
                       value={draft.type}
                       onChange={(e) => setDraft({ ...draft, type: e.target.value })}
                     >
-                      <option value="text" className="bg-[#0f1117] text-white" style={{ backgroundColor: '#0f1117', color: '#ffffff' }}>text</option>
-                      <option value="image" className="bg-[#0f1117] text-white" style={{ backgroundColor: '#0f1117', color: '#ffffff' }}>image</option>
-                      <option value="email" className="bg-[#0f1117] text-white" style={{ backgroundColor: '#0f1117', color: '#ffffff' }}>email</option>
-                      <option value="social" className="bg-[#0f1117] text-white" style={{ backgroundColor: '#0f1117', color: '#ffffff' }}>social</option>
+                      <option value="text" className="bg-surface-2 text-ink" style={{ backgroundColor: '#0f1117', color: '#ffffff' }}>text</option>
+                      <option value="image" className="bg-surface-2 text-ink" style={{ backgroundColor: '#0f1117', color: '#ffffff' }}>image</option>
+                      <option value="email" className="bg-surface-2 text-ink" style={{ backgroundColor: '#0f1117', color: '#ffffff' }}>email</option>
+                      <option value="social" className="bg-surface-2 text-ink" style={{ backgroundColor: '#0f1117', color: '#ffffff' }}>social</option>
                     </select>
-                    <ChevronDown className="w-4 h-4 text-zinc-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <ChevronDown className="w-4 h-4 text-muted absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                   </div>
                 </Field>
               </div>
@@ -258,7 +263,7 @@ export default function Review({ selected }: { selected: string }) {
                 onClick={create}
                 disabled={busy === 'create' || !draft.title || !draft.text}
               >
-                {busy === 'create' ? 'Creating…' : 'Create & Open Review Below'}
+                {busy === 'create' ? 'Creating…' : 'Create & Open'}
               </Btn>
             </div>
           </div>
@@ -268,7 +273,7 @@ export default function Review({ selected }: { selected: string }) {
         <div className="overflow-x-auto">
           <table className="w-full text-xs text-left">
             <thead>
-              <tr className="border-b border-white/10 text-zinc-400 uppercase tracking-wider text-[11px] bg-white/[0.01]">
+              <tr className="border-b border-hairline text-muted uppercase tracking-wider text-[11px] bg-surface/40">
                 <th className="py-3 px-6 font-semibold">Title & Excerpt</th>
                 <th className="py-3 px-4 font-semibold">Channel / Type</th>
                 <th className="py-3 px-4 font-semibold">Author & Team</th>
@@ -277,10 +282,10 @@ export default function Review({ selected }: { selected: string }) {
                 <th className="py-3 px-6 text-right font-semibold">Action</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-white/5">
+            <tbody className="divide-y divide-hairline">
               {visible.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="py-12 text-center text-zinc-500">
+                  <td colSpan={6} className="py-12 text-center text-faint">
                     No drafts currently match the filter criteria.
                   </td>
                 </tr>
@@ -290,44 +295,39 @@ export default function Review({ selected }: { selected: string }) {
                 return (
                   <tr
                     key={c.id}
-                    onClick={() => {
-                      location.hash = `#/review/${c.id}`
-                      setTimeout(() => {
-                        workspaceRef.current?.scrollIntoView({ behavior: 'smooth' })
-                      }, 100)
-                    }}
+                    onClick={() => { location.hash = `#/review/${c.id}` }}
                     className={`transition-all duration-200 cursor-pointer ${
                       isSelected
-                        ? 'bg-orange-500/[0.08] shadow-[inset_0_0_0_1px_rgba(249,115,22,0.35)]'
-                        : 'hover:bg-white/[0.02]'
+                        ? 'bg-accent/[0.08] shadow-[inset_0_0_0_1px_rgba(249,115,22,0.35)]'
+                        : 'hover:bg-surface-2'
                     }`}
                   >
                     <td className="py-4 px-6 max-w-xs sm:max-w-md">
-                      <div className="font-semibold text-white text-sm truncate flex items-center gap-2">
+                      <div className="font-semibold text-ink text-sm truncate flex items-center gap-2">
                         <span>{c.title}</span>
                         {isSelected && (
-                          <span className="text-[10px] text-orange-400 bg-orange-500/10 px-2 py-0.5 rounded border border-orange-500/20 font-mono">
+                          <span className="text-[10px] text-accent bg-accent/10 px-2 py-0.5 rounded border border-accent/25 font-mono">
                             Active
                           </span>
                         )}
                       </div>
-                      <div className="text-zinc-400 text-xs truncate mt-0.5 font-sans">
+                      <div className="text-muted text-xs truncate mt-0.5 font-sans">
                         {c.text || '(No text body — image asset)'}
                       </div>
                     </td>
                     <td className="py-4 px-4 whitespace-nowrap">
-                      <Badge className="bg-white/[0.04] text-zinc-300 border-white/10">
+                      <Badge className="bg-surface-2 text-ink border-hairline">
                         {c.channel} · {c.type}
                       </Badge>
                     </td>
-                    <td className="py-4 px-4 whitespace-nowrap text-zinc-300">
+                    <td className="py-4 px-4 whitespace-nowrap text-ink">
                       <div>{c.created_by}</div>
-                      <div className="text-[11px] text-zinc-500">team {c.team}</div>
+                      <div className="text-[11px] text-faint">team {c.team}</div>
                     </td>
                     <td className="py-4 px-4 whitespace-nowrap">
                       {c.sla_due_at ? (
-                        <div className="flex items-center gap-1.5 text-zinc-300">
-                          <Clock className={`w-3.5 h-3.5 ${c.status === 'review' ? 'text-amber-400' : 'text-zinc-500'}`} />
+                        <div className="flex items-center gap-1.5 text-ink">
+                          <Clock className={`w-3.5 h-3.5 ${c.status === 'review' ? 'text-warn' : 'text-faint'}`} />
                           <span>
                             {new Date(c.sla_due_at + 'Z').toLocaleString(undefined, {
                               month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
@@ -335,14 +335,14 @@ export default function Review({ selected }: { selected: string }) {
                           </span>
                         </div>
                       ) : (
-                        <span className="text-zinc-600">—</span>
+                        <span className="text-faint">—</span>
                       )}
                     </td>
                     <td className="py-4 px-4 whitespace-nowrap">
                       <StatusChip status={c.status} />
                     </td>
                     <td className="py-4 px-6 text-right whitespace-nowrap">
-                      <span className="inline-flex items-center gap-1 text-xs text-orange-400 group-hover:text-orange-300 font-medium">
+                      <span className="inline-flex items-center gap-1 text-xs text-accent group-hover:text-accent font-medium">
                         <span>{isSelected ? 'Viewing' : 'Inspect'}</span>
                         <ArrowDown className="w-3.5 h-3.5" />
                       </span>
@@ -354,45 +354,46 @@ export default function Review({ selected }: { selected: string }) {
           </table>
         </div>
       </section>
+      </>
+      )}
 
       {/* =========================================================================
           SECTION 2: FULL-PAGE EVALUATION WORKSPACE (Bottom Detailed View)
       ========================================================================= */}
-      <div ref={workspaceRef} className="space-y-6">
-        {!cid ? (
-          <div className="bg-white/[0.02] border border-white/10 rounded-2xl p-12 text-center backdrop-blur-xl">
-            <FileText className="w-10 h-10 text-zinc-600 mx-auto mb-3" />
-            <h3 className="text-base font-semibold text-white">No Draft Selected</h3>
-            <p className="text-xs text-zinc-400 max-w-md mx-auto mt-1">
-              Click any draft row in the queue above to open the full compliance evaluation workspace, run AI audits, and view generated findings.
-            </p>
-          </div>
-        ) : detail ? (
+      {cid && (
+      <div className="space-y-6">
+        {detail ? (
           <div className="space-y-6">
+            <button
+              onClick={() => { location.hash = '#/review' }}
+              className="inline-flex items-center gap-1.5 text-xs text-muted hover:text-ink min-h-10 px-1 transition-colors"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" /> Back to queue
+            </button>
             {/* Active Draft Action Bar */}
-            <div className="bg-white/[0.03] border border-white/10 rounded-2xl p-6 backdrop-blur-xl shadow-xl">
+            <div className="bg-surface border border-hairline rounded-lg p-6 backdrop-blur-sm shadow-none">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
                   <div className="flex items-center gap-3 flex-wrap">
-                    <span className="text-[11px] font-mono text-orange-400 uppercase tracking-wider bg-orange-500/10 px-2 py-0.5 rounded border border-orange-500/20">
+                    <span className="text-[11px] font-mono text-accent uppercase tracking-wider bg-accent/10 px-2 py-0.5 rounded border border-accent/25">
                       ACTIVE WORKSPACE
                     </span>
-                    <h2 className="text-xl font-bold tracking-tight text-white">
+                    <h2 className="text-xl font-bold tracking-tight text-ink">
                       {detail.title}
                     </h2>
                     <StatusChip status={detail.status} />
-                    <Badge className="bg-white/[0.04] text-zinc-300 border-white/10">
+                    <Badge className="bg-surface-2 text-ink border-hairline">
                       {detail.channel} · {detail.type}
                     </Badge>
                   </div>
-                  <div className="text-xs text-zinc-400 mt-1.5 flex items-center gap-3">
-                    <span>Author: <strong className="text-zinc-200">{detail.created_by}</strong></span>
+                  <div className="text-xs text-muted mt-1.5 flex items-center gap-3">
+                    <span>Author: <strong className="text-ink">{detail.created_by}</strong></span>
                     <span>·</span>
-                    <span>Team: <strong className="text-zinc-200">{detail.team}</strong></span>
+                    <span>Team: <strong className="text-ink">{detail.team}</strong></span>
                     {detail.sla_due_at && (
                       <>
                         <span>·</span>
-                        <span className="text-amber-400 flex items-center gap-1 font-medium">
+                        <span className="text-warn flex items-center gap-1 font-medium">
                           <Clock className="w-3.5 h-3.5" /> SLA Due: {new Date(detail.sla_due_at + 'Z').toLocaleString(undefined, {
                             month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
                           })}
@@ -404,15 +405,18 @@ export default function Review({ selected }: { selected: string }) {
 
                 {/* Primary Action Buttons */}
                 <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
-                  <Btn onClick={runReview} disabled={busy === 'review'}>
+                  <Btn onClick={runReview} disabled={busy === 'review'} data-tour="run-eval-btn">
                     <span className="flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5 text-orange-400" />
+                      <Sparkles className="w-3.5 h-3.5 text-accent" />
                       <span>{busy === 'review' ? 'Evaluating…' : result ? 'Re-run Evaluation' : 'Run AI Evaluation'}</span>
                     </span>
                   </Btn>
+                  {canManage && (
+                    <>
                   <Btn
                     kind="primary"
                     onClick={approve}
+                    data-tour="approve-draft-btn"
                     disabled={
                       busy === 'approve' ||
                       detail.status === 'approved' ||
@@ -436,13 +440,15 @@ export default function Review({ selected }: { selected: string }) {
                   >
                     Request Changes
                   </Btn>
+                    </>
+                  )}
                 </div>
               </div>
 
               {/* Approval Gating Banner */}
               {unresolvedCriticals.length > 0 && (
-                <div className="mt-4 text-xs text-red-300 bg-red-950/40 border border-red-500/30 px-4 py-3 rounded-xl flex items-center gap-2.5">
-                  <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                <div className="mt-4 text-xs text-danger bg-danger/10 border border-danger/30 px-4 py-3 rounded-md flex items-center gap-2.5">
+                  <AlertCircle className="w-4 h-4 text-danger shrink-0" />
                   <span>
                     <strong>Approval Blocked</strong> — {unresolvedCriticals.length} critical finding{unresolvedCriticals.length > 1 ? 's' : ''} require action (accept or dismiss each in the findings deck below) before this draft can ship.
                   </span>
@@ -451,23 +457,23 @@ export default function Review({ selected }: { selected: string }) {
 
               {/* AI Diagnostic Metrics */}
               {result && (
-                <div className="mt-4 pt-4 border-t border-white/5 flex items-center gap-6 text-xs text-zinc-400 flex-wrap">
+                <div className="mt-4 pt-4 border-t border-hairline flex items-center gap-6 text-xs text-muted flex-wrap">
                   <span className="flex items-center gap-1.5">
-                    <Cpu className="w-3.5 h-3.5 text-orange-400" />
-                    Provider: <strong className="text-white">{result.provider}</strong>
+                    <Cpu className="w-3.5 h-3.5 text-accent" />
+                    Provider: <strong className="text-ink">{result.provider}</strong>
                   </span>
-                  <span>Model: <strong className="text-white">{result.model}</strong></span>
-                  <span className="tabular-nums">Latency: <strong className="text-white">{result.latency_ms}ms</strong></span>
-                  <span className="tabular-nums">Tokens: <strong className="text-white">{result.tokens}</strong></span>
-                  <span>Findings Identified: <strong className="text-white">{result.findings.length}</strong></span>
+                  <span>Model: <strong className="text-ink">{result.model}</strong></span>
+                  <span className="tabular-nums">Latency: <strong className="text-ink">{result.latency_ms}ms</strong></span>
+                  <span className="tabular-nums">Tokens: <strong className="text-ink">{result.tokens}</strong></span>
+                  <span>Findings Identified: <strong className="text-ink">{result.findings.length}</strong></span>
                 </div>
               )}
             </div>
 
             {/* Error Toast */}
             {err && (
-              <div className="text-xs text-red-300 border border-red-500/30 bg-red-950/40 px-4 py-3 rounded-xl flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+              <div className="text-xs text-danger border border-danger/30 bg-danger/10 px-4 py-3 rounded-md flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-danger shrink-0" />
                 <span>{err}</span>
               </div>
             )}
@@ -477,24 +483,24 @@ export default function Review({ selected }: { selected: string }) {
               {/* Left Column: Draft Content & Revisions Diff */}
               <div className="lg:col-span-5 space-y-6">
                 {/* Content Under Review */}
-                <section className="bg-white/[0.03] border border-white/10 rounded-2xl overflow-hidden backdrop-blur-xl shadow-lg">
-                  <header className="px-5 py-3.5 border-b border-white/10 flex items-center justify-between bg-white/[0.01]">
-                    <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-300">
+                <section className="bg-surface border border-hairline rounded-lg overflow-hidden backdrop-blur-sm shadow-none">
+                  <header className="px-5 py-3.5 border-b border-hairline flex items-center justify-between bg-surface/40">
+                    <h3 className="text-xs font-semibold uppercase tracking-wider text-ink">
                       Content Under Review
                     </h3>
-                    <span className="text-[11px] text-zinc-500 font-mono">
+                    <span className="text-[11px] text-faint font-mono">
                       {detail.text.length} chars
                     </span>
                   </header>
-                  <pre className="p-5 text-sm leading-relaxed whitespace-pre-wrap font-sans text-zinc-100 bg-[#06070a]/70">
-                    {detail.text || <span className="text-zinc-500 italic">(Empty text content — visual asset draft)</span>}
+                  <pre className="p-5 text-sm leading-relaxed whitespace-pre-wrap font-sans text-ink bg-surface/70">
+                    {detail.text || <span className="text-faint italic">(Empty text content — visual asset draft)</span>}
                   </pre>
                   {detail.image_path && (
-                    <div className="p-5 border-t border-white/5">
+                    <div className="p-5 border-t border-hairline">
                       <img
                         src={detail.image_path}
                         alt=""
-                        className="max-h-60 rounded-xl border border-white/10"
+                        className="max-h-60 rounded-md border border-hairline"
                       />
                     </div>
                   )}
@@ -502,15 +508,15 @@ export default function Review({ selected }: { selected: string }) {
 
                 {/* Revision Timeline & Diff */}
                 {versions.length > 0 && (
-                  <section className="bg-white/[0.03] border border-white/10 rounded-2xl overflow-hidden backdrop-blur-xl shadow-lg">
-                    <header className="px-5 py-3.5 border-b border-white/10 flex justify-between items-center bg-white/[0.01]">
+                  <section className="bg-surface border border-hairline rounded-lg overflow-hidden backdrop-blur-sm shadow-none">
+                    <header className="px-5 py-3.5 border-b border-hairline flex justify-between items-center bg-surface/40">
                       <div className="flex items-center gap-2">
-                        <History className="w-3.5 h-3.5 text-zinc-400" />
-                        <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-300">
+                        <History className="w-3.5 h-3.5 text-muted" />
+                        <h3 className="text-xs font-semibold uppercase tracking-wider text-ink">
                           Revisions Timeline
                         </h3>
                       </div>
-                      <span className="text-xs text-zinc-500">
+                      <span className="text-xs text-faint">
                         {versions.length} version{versions.length > 1 ? 's' : ''}
                       </span>
                     </header>
@@ -519,7 +525,7 @@ export default function Review({ selected }: { selected: string }) {
                         {versions.map((v) => (
                           <Badge
                             key={v.version}
-                            className="bg-white/[0.04] text-zinc-300 border-white/10"
+                            className="bg-surface-2 text-ink border-hairline"
                           >
                             v{v.version} · {v.status}
                           </Badge>
@@ -528,19 +534,19 @@ export default function Review({ selected }: { selected: string }) {
 
                       {diff && (
                         <details className="mt-3 group" open={diff.added + diff.removed > 0}>
-                          <summary className="text-xs font-semibold uppercase tracking-wider text-orange-400 cursor-pointer hover:text-orange-300 flex items-center gap-2 select-none">
+                          <summary className="text-xs font-semibold uppercase tracking-wider text-accent cursor-pointer hover:text-accent flex items-center gap-2 select-none">
                             <span>Revisions Diff (+{diff.added} / −{diff.removed})</span>
                           </summary>
-                          <pre className="mt-2.5 font-mono text-xs bg-[#06070a]/90 border border-white/10 rounded-xl p-4 overflow-x-auto leading-relaxed">
+                          <pre className="mt-2.5 font-mono text-xs bg-surface/90 border border-hairline rounded-md p-4 overflow-x-auto leading-relaxed">
                             {diff.lines.map((l, i) => (
                               <div
                                 key={i}
                                 className={
                                   l.startsWith('+')
-                                    ? 'text-emerald-400 bg-emerald-500/10 px-1 rounded'
+                                    ? 'text-sage bg-sage/10 px-1 rounded'
                                     : l.startsWith('-')
-                                    ? 'text-red-400 bg-red-500/10 px-1 rounded'
-                                    : 'text-zinc-500'
+                                    ? 'text-danger bg-danger/10 px-1 rounded'
+                                    : 'text-faint'
                                 }
                               >
                                 {l}
@@ -557,17 +563,17 @@ export default function Review({ selected }: { selected: string }) {
               {/* Right Column: Generated Findings Deck & Reviewer Thread */}
               <div className="lg:col-span-7 space-y-6">
                 {/* Findings Deck (Generated Evaluation Summary) */}
-                <section className="bg-white/[0.03] border border-white/10 rounded-2xl overflow-hidden backdrop-blur-xl shadow-lg">
-                  <header className="px-5 py-3.5 border-b border-white/10 flex justify-between items-center bg-white/[0.01]">
+                <section data-tour="findings-list" className="bg-surface border border-hairline rounded-lg overflow-hidden backdrop-blur-sm shadow-none">
+                  <header className="px-5 py-3.5 border-b border-hairline flex justify-between items-center bg-surface/40">
                     <div className="flex items-center gap-2.5">
-                      <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-300">
+                      <h3 className="text-xs font-semibold uppercase tracking-wider text-ink">
                         Generated Evaluation Summary & Findings
                       </h3>
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-white/5 text-zinc-400 border border-white/10 font-mono">
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-surface-2 text-muted border border-hairline font-mono">
                         {findings.length}
                       </span>
                     </div>
-                    <span className="text-xs text-zinc-400">
+                    <span className="text-xs text-muted">
                       {findings.filter((f) => f.accepted === 1).length} accepted · {findings.filter((f) => f.accepted === 2).length} dismissed
                     </span>
                   </header>
@@ -575,15 +581,15 @@ export default function Review({ selected }: { selected: string }) {
                   {findings.length === 0 && (
                     <div className="p-8">
                       <Empty>
-                        <p className="text-zinc-300 font-medium">No findings recorded yet.</p>
-                        <p className="text-xs text-zinc-500 mt-1">
+                        <p className="text-ink font-medium">No findings recorded yet.</p>
+                        <p className="text-xs text-faint mt-1">
                           Click "Run AI Evaluation" above to audit copy against brand guidelines, prohibited terminology, and facts.
                         </p>
                       </Empty>
                     </div>
                   )}
 
-                  <ul className="divide-y divide-white/5">
+                  <ul className="divide-y divide-hairline">
                     {findings.map((f) => (
                       <li
                         key={f.id}
@@ -592,18 +598,18 @@ export default function Review({ selected }: { selected: string }) {
                         <div className="flex flex-col sm:flex-row items-start gap-4">
                           <SeverityBadge severity={f.severity} />
                           <div className="flex-1 min-w-0 space-y-2">
-                            <div className="text-sm font-semibold text-white">
+                            <div className="text-sm font-semibold text-ink">
                               {f.rule}
                             </div>
                             {f.excerpt && (
-                              <code className="font-mono text-xs bg-white/[0.05] border border-white/10 text-orange-300 px-2.5 py-1 rounded-md inline-block break-all">
+                              <code className="font-mono text-xs bg-surface-2 border border-hairline text-accent px-2.5 py-1 rounded-md inline-block break-all">
                                 "{f.excerpt}"
                               </code>
                             )}
-                            <div className="text-xs text-zinc-300 leading-relaxed">
+                            <div className="text-xs text-ink leading-relaxed">
                               {f.suggestion}
                             </div>
-                            <div className="text-[11px] text-zinc-500 flex gap-3 flex-wrap pt-1">
+                            <div className="text-[11px] text-faint flex gap-3 flex-wrap pt-1">
                               <span className="capitalize">Category: {f.category}</span>
                               <span>·</span>
                               <span>Confidence: {Math.round(f.confidence * 100)}%</span>
@@ -615,12 +621,13 @@ export default function Review({ selected }: { selected: string }) {
                           </div>
 
                           {/* Action Buttons */}
+                          {canReview && (
                           <div className="flex gap-2 shrink-0 self-end sm:self-start">
                             {f.accepted !== 1 && (
                               <Btn
                                 kind="ghost"
                                 onClick={() => setFinding(f, 1)}
-                                className="!py-1 !px-2.5 !text-xs !border-emerald-500/30 hover:!bg-emerald-500/10 text-emerald-400"
+                                className="!py-1 !px-2.5 !text-xs !border-sage/30 hover:!bg-sage/10 text-sage"
                               >
                                 <Check className="w-3.5 h-3.5 inline mr-1" />
                                 Accept
@@ -646,9 +653,10 @@ export default function Review({ selected }: { selected: string }) {
                               </Btn>
                             )}
                           </div>
+                          )}
                         </div>
                         {f.accepted === 1 && (
-                          <div className="text-xs text-emerald-400 mt-2.5 flex items-center gap-1.5 font-medium">
+                          <div className="text-xs text-sage mt-2.5 flex items-center gap-1.5 font-medium">
                             <CheckCircle2 className="w-3.5 h-3.5" />
                             <span>Accepted — counts towards compliance threshold.</span>
                           </div>
@@ -659,31 +667,31 @@ export default function Review({ selected }: { selected: string }) {
                 </section>
 
                 {/* Peer Review Notes & Comment Thread */}
-                <section className="bg-white/[0.03] border border-white/10 rounded-2xl overflow-hidden backdrop-blur-xl shadow-lg">
-                  <header className="px-5 py-3.5 border-b border-white/10 flex items-center justify-between bg-white/[0.01]">
+                <section className="bg-surface border border-hairline rounded-lg overflow-hidden backdrop-blur-sm shadow-none">
+                  <header className="px-5 py-3.5 border-b border-hairline flex items-center justify-between bg-surface/40">
                     <div className="flex items-center gap-2">
-                      <MessageSquare className="w-3.5 h-3.5 text-zinc-400" />
-                      <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-300">
+                      <MessageSquare className="w-3.5 h-3.5 text-muted" />
+                      <h3 className="text-xs font-semibold uppercase tracking-wider text-ink">
                         Peer Reviewer Thread
                       </h3>
                     </div>
-                    <span className="text-xs text-zinc-500">{comments.length} notes</span>
+                    <span className="text-xs text-faint">{comments.length} notes</span>
                   </header>
                   <div className="p-5 space-y-4">
                     {comments.length === 0 && (
-                      <p className="text-xs text-zinc-500">No reviewer notes posted yet on this draft.</p>
+                      <p className="text-xs text-faint">No reviewer notes posted yet on this draft.</p>
                     )}
                     {comments.map((c) => (
                       <div
                         key={c.id}
-                        className={`p-3.5 rounded-xl bg-white/[0.02] border border-white/5 text-xs ${
+                        className={`p-3.5 rounded-md bg-surface-2 border border-hairline text-xs ${
                           c.resolved ? 'opacity-40' : ''
                         }`}
                       >
                         <div className="flex gap-2 items-center justify-between mb-1">
                           <div className="flex items-center gap-2">
-                            <strong className="text-zinc-200">{c.author}</strong>
-                            <span className="text-[11px] text-zinc-500">
+                            <strong className="text-ink">{c.author}</strong>
+                            <span className="text-[11px] text-faint">
                               {new Date(c.created_at + 'Z').toLocaleDateString(undefined, {
                                 month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
                               })}
@@ -691,7 +699,7 @@ export default function Review({ selected }: { selected: string }) {
                           </div>
                           {!c.resolved ? (
                             <button
-                              className="text-[11px] text-orange-400 hover:text-orange-300 transition-colors cursor-pointer"
+                              className="text-[11px] text-accent hover:text-accent transition-colors cursor-pointer"
                               onClick={async () => {
                                 await api(`/comments/${c.id}`, {
                                   method: 'PATCH', body: { resolved: true },
@@ -702,12 +710,12 @@ export default function Review({ selected }: { selected: string }) {
                               Mark resolved
                             </button>
                           ) : (
-                            <span className="text-[11px] text-emerald-400 flex items-center gap-1">
+                            <span className="text-[11px] text-sage flex items-center gap-1">
                               <Check className="w-3 h-3" /> Resolved
                             </span>
                           )}
                         </div>
-                        <div className="text-zinc-300 leading-relaxed">{c.body}</div>
+                        <div className="text-ink leading-relaxed">{c.body}</div>
                       </div>
                     ))}
 
@@ -734,6 +742,7 @@ export default function Review({ selected }: { selected: string }) {
           </div>
         ) : null}
       </div>
+      )}
     </div>
   )
 }

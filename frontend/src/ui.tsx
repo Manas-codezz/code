@@ -1,19 +1,22 @@
-/* Shared primitives — modern dark glassmorphic system. */
+/* Shared primitives — Amethyst & Sage: flat surfaces, hairlines, no glow. */
 import type { ReactNode } from 'react'
 
+const tint = (v: string, pct = 12) =>
+  `color-mix(in oklab, ${v} ${pct}%, transparent)`
+
 export const SEV_STYLE: Record<string, string> = {
-  critical: 'bg-red-500/20 text-red-300 border-red-500/40 shadow-[0_0_10px_rgba(239,68,68,0.2)]',
-  warning: 'bg-amber-500/15 text-amber-300 border-amber-500/30 shadow-[0_0_10px_rgba(245,158,11,0.15)]',
-  suggestion: 'bg-zinc-800/60 text-zinc-400 border-zinc-700/50',
+  critical: 'text-danger border-danger/40 bg-danger/10',
+  warning: 'text-warn border-warn/40 bg-warn/10',
+  suggestion: 'text-muted border-hairline-strong bg-surface-2',
 }
 
 export const STATUS_STYLE: Record<string, string> = {
-  draft: 'text-zinc-400 border-white/10 bg-white/[0.03]',
-  review: 'text-amber-300 border-amber-500/30 bg-amber-500/10 shadow-[0_0_8px_rgba(245,158,11,0.15)]',
-  peer_review: 'text-amber-300 border-amber-500/30 bg-amber-500/10',
-  changes: 'text-orange-400 border-orange-500/30 bg-orange-500/10 shadow-[0_0_8px_rgba(249,115,22,0.15)]',
-  approved: 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10 shadow-[0_0_8px_rgba(16,185,129,0.15)]',
-  published: 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10',
+  draft: 'text-muted border-hairline-strong bg-surface-2',
+  review: 'text-warn border-warn/40 bg-warn/10',
+  peer_review: 'text-warn border-warn/40 bg-warn/10',
+  changes: 'text-danger border-danger/40 bg-danger/10',
+  approved: 'text-sage border-sage/40 bg-sage/10',
+  published: 'text-sage border-sage/40 bg-sage/10',
 }
 
 export function Badge({ children, className = '' }: {
@@ -21,7 +24,7 @@ export function Badge({ children, className = '' }: {
 }) {
   return (
     <span className={`inline-flex items-center border px-2 py-0.5
-      text-[10px] font-semibold uppercase tracking-wider rounded-md backdrop-blur-md
+      text-[10px] font-semibold uppercase tracking-wider rounded-md
       ${className}`}>{children}</span>
   )
 }
@@ -36,16 +39,14 @@ export function Btn({ children, onClick, kind = 'ghost', disabled,
   className?: string
   title?: string
 }) {
-  const base = `px-3.5 py-1.5 text-[13px] font-medium border rounded-lg
-    transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer`
   const kinds = {
-    primary: 'bg-gradient-to-r from-orange-600 to-orange-500 hover:from-orange-500 hover:to-orange-400 text-white border-orange-500/40 shadow-[0_0_20px_rgba(219,75,22,0.3)]',
-    ghost: 'bg-white/[0.04] text-zinc-200 border-white/10 hover:bg-white/[0.08] hover:border-white/20 hover:text-white',
-    danger: 'bg-red-500/10 text-red-400 border-red-500/30 hover:bg-red-500/20 hover:border-red-500/50',
+    primary: 'btn-primary',
+    ghost: 'btn-ghost',
+    danger: 'btn-danger',
   }
   return (
     <button type={type} onClick={onClick} disabled={disabled} title={title}
-            className={`${base} ${kinds[kind]} ${className}`}>
+            className={`btn ${kinds[kind]} ${className}`}>
       {children}
     </button>
   )
@@ -56,20 +57,18 @@ export function Field({ label, children }: {
 }) {
   return (
     <label className="block">
-      <span className="eyebrow block mb-1.5 text-zinc-300">{label}</span>
+      <span className="eyebrow block mb-1.5">{label}</span>
       {children}
     </label>
   )
 }
 
-export const inputCls = `w-full border border-white/10 bg-white/[0.04] text-white px-3.5 py-2
-  text-sm rounded-lg placeholder:text-zinc-500 focus:border-orange-500/80
-  focus:ring-1 focus:ring-orange-500/40 focus:outline-none transition-all`
+export const inputCls = 'input'
 
 export function Empty({ children }: { children: ReactNode }) {
   return (
-    <div className="border border-dashed border-white/10 bg-white/[0.01] rounded-xl
-      px-4 py-8 text-center text-sm text-zinc-400">
+    <div className="border border-dashed border-hairline bg-surface/40 rounded-lg
+      px-4 py-8 text-center text-sm text-muted">
       {children}
     </div>
   )
@@ -93,14 +92,69 @@ export function Bar({ value, max, tone = 'ink' }: {
 }) {
   const pct = max > 0 ? Math.round((value / max) * 100) : 0
   const color = {
-    ink: 'bg-zinc-300 shadow-[0_0_8px_rgba(255,255,255,0.3)]',
-    accent: 'bg-gradient-to-r from-orange-500 to-amber-500 shadow-[0_0_8px_rgba(249,115,22,0.5)]',
-    critical: 'bg-gradient-to-r from-red-600 to-red-400 shadow-[0_0_8px_rgba(239,68,68,0.5)]',
+    ink: 'bg-muted',
+    accent: 'bg-accent',
+    critical: 'bg-danger',
   }[tone]
   return (
-    <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
+    <div className="h-1.5 bg-surface-3 rounded-full overflow-hidden">
       <div className={`h-full ${color} rounded-full transition-[width]`}
            style={{ width: `${pct}%` }} />
     </div>
   )
 }
+
+/** Tiny inline trend line — no chart lib needed for KPIs. */
+export function Sparkline({ points, tone = 'accent', className = '' }: {
+  points: number[]
+  tone?: 'accent' | 'sage' | 'warn' | 'danger'
+  className?: string
+}) {
+  const color = {
+    accent: 'var(--color-accent)',
+    sage: 'var(--color-sage)',
+    warn: 'var(--color-warn)',
+    danger: 'var(--color-danger)',
+  }[tone]
+  const w = 120
+  const h = 28
+  const max = Math.max(...points, 1)
+  const min = Math.min(...points, 0)
+  const span = max - min || 1
+  const step = points.length > 1 ? w / (points.length - 1) : w
+  const d = points
+    .map((p, i) => {
+      const x = i * step
+      const y = h - 3 - ((p - min) / span) * (h - 6)
+      return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`
+    })
+    .join(' ')
+  return (
+    <svg className={className} width="100%" height={h} viewBox={`0 0 ${w} ${h}`}
+         preserveAspectRatio="none" aria-hidden="true">
+      <path d={d} fill="none" stroke={color} strokeWidth="2"
+            strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+export function Skeleton({ className = '' }: { className?: string }) {
+  return (
+    <div className={`animate-pulse rounded-md bg-surface-3 ${className}`} />
+  )
+}
+
+/** Shared heat-cell tone so dashboard and tables agree. */
+export function heatStyle(count: number, max: number, sev: string) {
+  if (!count) return { background: 'var(--color-surface-2)', color: 'var(--color-faint)' }
+  const a = 0.18 + 0.72 * (count / Math.max(max, 1))
+  const rgb = sev === 'critical' ? '229,138,138'
+    : sev === 'warning' ? '217,185,120'
+      : '154,147,166'
+  return {
+    background: `rgba(${rgb},${a.toFixed(2)})`,
+    color: 'var(--color-ink)',
+  }
+}
+
+export { tint }
