@@ -30,7 +30,7 @@ export function Badge({ children, className = '' }: {
 }
 
 export function Btn({ children, onClick, kind = 'ghost', disabled,
-                      type = 'button', className = '', title }: {
+                      type = 'button', className = '', title, 'data-tour': dataTour }: {
   children: ReactNode
   onClick?: () => void
   kind?: 'primary' | 'ghost' | 'danger'
@@ -38,6 +38,7 @@ export function Btn({ children, onClick, kind = 'ghost', disabled,
   type?: 'button' | 'submit'
   className?: string
   title?: string
+  'data-tour'?: string
 }) {
   const kinds = {
     primary: 'btn-primary',
@@ -46,6 +47,7 @@ export function Btn({ children, onClick, kind = 'ghost', disabled,
   }
   return (
     <button type={type} onClick={onClick} disabled={disabled} title={title}
+            data-tour={dataTour}
             className={`btn ${kinds[kind]} ${className}`}>
       {children}
     </button>
