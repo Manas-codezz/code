@@ -87,7 +87,7 @@ def current_user(request: Request) -> dict:
     claims = _decode(header[7:].strip(), "access")
     with db.get() as conn:
         user = db.one(conn, "SELECT id, email, role, team, active "
-                            "FROM users WHERE id=?", (claims["sub"],))
+                            "FROM users WHERE id=?", (int(claims["sub"]),))
     if not user or not user["active"]:
         raise HTTPException(401, "User disabled or deleted")
     return user

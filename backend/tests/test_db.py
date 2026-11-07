@@ -21,3 +21,14 @@ def test_defaults_to_sqlite():
     from app.settings import settings
     assert settings.database_url == ""
     assert is_postgres() is False
+
+
+def test_legacy_user_table_renamed():
+    import sqlite3
+    from app.db import _rename_legacy_user
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE user (id INTEGER PRIMARY KEY, email TEXT)")
+    _rename_legacy_user(conn)
+    names = {r[0] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "users" in names and "user" not in names
