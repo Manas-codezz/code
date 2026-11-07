@@ -166,7 +166,7 @@ CREATE TABLE IF NOT EXISTS content_version (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS user (
+CREATE TABLE IF NOT EXISTS users (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     email         TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
@@ -178,7 +178,7 @@ CREATE TABLE IF NOT EXISTS user (
 
 CREATE TABLE IF NOT EXISTS refresh_token (
     jti        TEXT PRIMARY KEY,
-    user_id    INTEGER NOT NULL REFERENCES user(id),
+    user_id    INTEGER NOT NULL REFERENCES users(id),
     expires_at TEXT NOT NULL,
     revoked    INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -186,7 +186,7 @@ CREATE TABLE IF NOT EXISTS refresh_token (
 
 CREATE INDEX IF NOT EXISTS idx_finding_content ON finding(content_id);
 CREATE INDEX IF NOT EXISTS idx_content_status  ON content(status);
-CREATE INDEX IF NOT EXISTS idx_user_email      ON user(email);
+CREATE INDEX IF NOT EXISTS idx_user_email      ON users(email);
 CREATE INDEX IF NOT EXISTS idx_version_content ON content_version(content_id);
 CREATE INDEX IF NOT EXISTS idx_comment_content ON comment(content_id);
 """
@@ -230,6 +230,19 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute(ddl)
 
 
+def _rename_legacy_user(conn: sqlite3.Connection) -> None:
+    """SQLite DBs created before the Postgres port used a `user` table;
+    Postgres reserves that word, so the table is now `users`."""
+    old = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='user'"
+    ).fetchone()
+    new = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='users'"
+    ).fetchone()
+    if old and not new:
+        conn.execute("ALTER TABLE user RENAME TO users")
+
+
 def init() -> None:
     if is_postgres():
         with get() as conn:
@@ -237,6 +250,7 @@ def init() -> None:
             conn.commit()
         return
     with get() as conn:
+        _rename_legacy_user(conn)
         conn.executescript(SCHEMA)
         _migrate(conn)
 

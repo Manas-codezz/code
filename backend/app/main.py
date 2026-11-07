@@ -126,7 +126,7 @@ class UserCreate(BaseModel):
 @app.post("/auth/login")
 def login(body: LoginBody):
     with db.get() as conn:
-        user = db.one(conn, "SELECT * FROM user WHERE email=? AND active=1",
+        user = db.one(conn, "SELECT * FROM users WHERE email=? AND active=1",
                       (body.email.lower().strip(),))
     if not user or not auth.verify_password(body.password,
                                             user["password_hash"]):
@@ -147,7 +147,7 @@ def refresh(body: dict = Body(...)):
     claims = auth.decode_refresh(token)
     auth.revoke(claims["jti"])                      # rotation: old dies
     with db.get() as conn:
-        user = db.one(conn, "SELECT * FROM user WHERE id=? AND active=1",
+        user = db.one(conn, "SELECT * FROM users WHERE id=? AND active=1",
                       (claims["sub"],))
     if not user:
         raise HTTPException(401, "User gone")
@@ -178,17 +178,17 @@ def me(user: dict = Depends(current_user)):
 def create_user(body: UserCreate, _: dict = Depends(
         require_role("admin"))):
     with db.get() as conn:
-        if db.one(conn, "SELECT id FROM user WHERE email=?",
+        if db.one(conn, "SELECT id FROM users WHERE email=?",
                   (body.email.lower().strip(),)):
             raise HTTPException(409, "email already registered")
         cur = conn.execute(
-            "INSERT INTO user (email, password_hash, role, team) "
+            "INSERT INTO users (email, password_hash, role, team) "
             "VALUES (?,?,?,?) RETURNING id",
             (body.email.lower().strip(), auth.hash_password(body.password),
              body.role, body.team))
         new_id = cur.fetchone()["id"]
         conn.commit()
-        row = db.one(conn, "SELECT id, email, role, team FROM user "
+        row = db.one(conn, "SELECT id, email, role, team FROM users "
                            "WHERE id=?", (new_id,))
     return row
 
@@ -196,7 +196,7 @@ def create_user(body: UserCreate, _: dict = Depends(
 @app.get("/auth/users")
 def list_users(user: dict = Depends(require_role("admin"))):
     with db.get() as conn:
-        return db.rows(conn, "SELECT id, email, role, team FROM user")
+        return db.rows(conn, "SELECT id, email, role, team FROM users")
 
 
 class UserPatch(BaseModel):
@@ -207,14 +207,14 @@ class UserPatch(BaseModel):
 def update_user(uid: int, body: UserPatch, admin: dict = Depends(
         require_role("admin"))):
     with db.get() as conn:
-        row = db.one(conn, "SELECT * FROM user WHERE id=?", (uid,))
+        row = db.one(conn, "SELECT * FROM users WHERE id=?", (uid,))
         if not row:
             raise HTTPException(404, "user not found")
         if uid == admin["id"] and body.role != "admin":
             raise HTTPException(409, "cannot change your own admin role")
-        conn.execute("UPDATE user SET role=? WHERE id=?", (body.role, uid))
+        conn.execute("UPDATE users SET role=? WHERE id=?", (body.role, uid))
         conn.commit()
-        return db.one(conn, "SELECT id, email, role, team FROM user WHERE id=?",
+        return db.one(conn, "SELECT id, email, role, team FROM users WHERE id=?",
                       (uid,))
 
 
@@ -223,10 +223,10 @@ def delete_user(uid: int, admin: dict = Depends(require_role("admin"))):
     if uid == admin["id"]:
         raise HTTPException(409, "cannot delete your own account")
     with db.get() as conn:
-        row = db.one(conn, "SELECT id FROM user WHERE id=?", (uid,))
+        row = db.one(conn, "SELECT id FROM users WHERE id=?", (uid,))
         if not row:
             raise HTTPException(404, "user not found")
-        conn.execute("DELETE FROM user WHERE id=?", (uid,))
+        conn.execute("DELETE FROM users WHERE id=?", (uid,))
         conn.commit()
 
 

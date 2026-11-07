@@ -570,14 +570,19 @@ uvicorn app.main:app --host 0.0.0.0 --port $PORT
 # required env
 GROQ_API_KEY=...            LLM_PROVIDER=groq
 JWT_SECRET=<long-random>    WEBHOOK_SECRET=<long-random>
-DATABASE_PATH=/data/brandguard.db          # persistent volume!
 CORS_ORIGINS=https://your-frontend.example
+
+# pick ONE database backend:
+DATABASE_URL=postgresql://postgres.[ref]:[pw]@aws-0-[region].pooler.supabase.com:5432/postgres?sslmode=require
+#   ^ Postgres / Supabase (session pooler). Overrides DATABASE_PATH.
+DATABASE_PATH=/data/brandguard.db          # SQLite fallback + persistent volume
 ```
 
-> SQLite needs a **persistent volume** in production — set `DATABASE_PATH`
-> outside the container filesystem. The app is designed for a single
-> instance (in-memory rate limiter); run one replica or move the limiter
-> to Redis first.
+> `DATABASE_URL` wins when set; otherwise the app uses SQLite at
+> `DATABASE_PATH`. SQLite needs a **persistent volume** in production. On
+> Supabase, the DB persists for free but uploaded images still need a volume
+> or object storage. The app is designed for a single instance (in-memory
+> rate limiter); run one replica or move the limiter to Redis first.
 
 ### Frontend
 
