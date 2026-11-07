@@ -1,13 +1,14 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { loadAuth, logout, type User } from './api'
+import { loadAuth, login, logout, type User } from './api'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Review from './pages/Review'
 import KB from './pages/KB'
 import { BrandLogo } from './components/ui/BrandLogo'
-import { Toaster } from 'sonner'
+import RoleTourGuide from './components/ui/RoleTourGuide'
+import { Toaster, toast } from 'sonner'
 import {
-  ArrowRight, BookOpen, Command, FileCheck2, LayoutDashboard, LogOut,
+  ArrowRight, BookOpen, Command, Compass, FileCheck2, LayoutDashboard, LogOut,
   Menu, Search, X,
 } from 'lucide-react'
 
@@ -65,8 +66,29 @@ export default function App() {
   const [path, setPath] = useState(() => parseHash(Boolean(user)))
   const [navOpen, setNavOpen] = useState(false)
   const [cmdOpen, setCmdOpen] = useState(false)
+  const [tourOpen, setTourOpen] = useState(false)
   const [q, setQ] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)
+
+  const handleSwitchRole = async (role: 'creator' | 'reviewer' | 'manager' | 'admin') => {
+    const creds: Record<string, { email: string; pw: string }> = {
+      creator: { email: 'creator@brandguard.demo', pw: 'creator123' },
+      reviewer: { email: 'reviewer@brandguard.demo', pw: 'reviewer123' },
+      manager: { email: 'manager@brandguard.demo', pw: 'manager123' },
+      admin: { email: 'admin@brandguard.demo', pw: 'admin12345' },
+    }
+    const target = creds[role]
+    if (!target) return
+    try {
+      const newUser = await login(target.email, target.pw)
+      setUser(newUser)
+      toast.success(`Switched role to ${role.toUpperCase()}`, {
+        description: `Now viewing as ${newUser.email} (${newUser.team} team)`
+      })
+    } catch {
+      toast.error(`Failed to switch to ${role}`)
+    }
+  }
 
   useEffect(() => {
     const on = () => {
@@ -117,6 +139,12 @@ export default function App() {
     return [
       ...base,
       {
+        id: 'tour',
+        label: 'Interactive Role Tour',
+        hint: 'Start guided 4-role compliance tour',
+        run: () => { setTourOpen(true); setCmdOpen(false) },
+      },
+      {
         id: 'hero',
         label: 'Landing page',
         hint: 'View the public site',
@@ -161,7 +189,15 @@ export default function App() {
             setPath({ route: 'dashboard', arg: '' })
           }}
         />
-        <Toaster theme="dark" position="bottom-right" />
+        {/* Role Tour Guide */}
+      <RoleTourGuide
+        currentUser={user}
+        isOpen={tourOpen}
+        onClose={() => setTourOpen(false)}
+        onSwitchRole={handleSwitchRole}
+      />
+
+      <Toaster theme="dark" position="bottom-right" />
       </>
     )
   }
@@ -283,7 +319,14 @@ export default function App() {
               <span className="hidden sm:inline"> — automated rules run; a human always signs off.</span>
             </span>
           </div>
-          <div className="flex items-center gap-3 shrink-0">
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            <button
+              onClick={() => setTourOpen((t) => !t)}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-md bg-accent/15 border border-accent/35 text-accent hover:bg-accent/25 transition-all cursor-pointer shadow-sm"
+            >
+              <Compass className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Role Tour</span>
+            </button>
             <button
               onClick={() => setCmdOpen(true)}
               aria-label="Open command palette"
@@ -357,6 +400,14 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Role Tour Guide */}
+      <RoleTourGuide
+        currentUser={user}
+        isOpen={tourOpen}
+        onClose={() => setTourOpen(false)}
+        onSwitchRole={handleSwitchRole}
+      />
 
       <Toaster theme="dark" position="bottom-right" />
     </div>
