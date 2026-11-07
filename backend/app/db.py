@@ -37,16 +37,34 @@ class _PGCursor:
         return self._cur.fetchall()
 
 
+_pool = None
+
+
+def _pg_url() -> str:
+    url = settings.database_url.strip()
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://"):]
+    return url
+
+
+def _get_pool():
+    """One warm connection pool per process — TLS handshakes are expensive."""
+    global _pool
+    if _pool is None:
+        from psycopg_pool import ConnectionPool
+        from psycopg.rows import dict_row
+        _pool = ConnectionPool(
+            _pg_url(), min_size=1, max_size=5,
+            kwargs={"row_factory": dict_row}, open=True)
+    return _pool
+
+
 class _PGConnection:
     """Minimal DB-API facade so the SQLite-era call sites stay unchanged."""
 
     def __init__(self):
-        import psycopg
-        from psycopg.rows import dict_row
-        url = settings.database_url.strip()
-        if url.startswith("postgres://"):
-            url = "postgresql://" + url[len("postgres://"):]
-        self._conn = psycopg.connect(url, row_factory=dict_row)
+        self._ctx = _get_pool().connection()
+        self._conn = self._ctx.__enter__()
 
     def execute(self, sql: str, args: tuple = ()):
         cur = self._conn.cursor()
@@ -70,11 +88,7 @@ class _PGConnection:
         return self
 
     def __exit__(self, exc_type, exc, tb):
-        if exc_type is None:
-            self._conn.commit()
-        else:
-            self._conn.rollback()
-        self._conn.close()
+        self._ctx.__exit__(exc_type, exc, tb)
 
 
 SCHEMA = """

@@ -14,7 +14,7 @@ dependencies = [
     "python-dotenv",
     "bcrypt>=5.0.0",
     "pyjwt>=2.8.0",
-    "psycopg[binary]>=3.2",
+    "psycopg[binary,pool]>=3.2",
 ]
 
 [tool.pytest.ini_options]
