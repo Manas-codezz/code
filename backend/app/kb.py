@@ -90,13 +90,15 @@ for _kind, _spec in SPEC.items():
             cols = ", ".join(data)
             ph = ", ".join("?" * len(data))
             cur = conn.execute(
-                f"INSERT INTO {SPEC[kind]['table']} ({cols}) VALUES ({ph})",
+                f"INSERT INTO {SPEC[kind]['table']} ({cols}) VALUES ({ph})"
+                " RETURNING id",
                 tuple(data.values()))
+            new_id = cur.fetchone()["id"]
             db.log_audit(conn, None, user["email"], f"kb_create_{kind}",
                          str(data)[:200])
             conn.commit()
             return db.one(conn, f"SELECT * FROM {SPEC[kind]['table']} "
-                                "WHERE id=?", (cur.lastrowid,))
+                                "WHERE id=?", (new_id,))
 
     def _update(i: int, kind: str = _kind, body: dict | None = None,
                 user: dict = Depends(require_role("manager"))):

@@ -1,6 +1,95 @@
-"""SQLite access — stdlib only, no ORM. Path comes from settings (deploy-safe)."""
+"""Database access — SQLite locally, Postgres (Supabase) in production.
+
+Set DATABASE_URL (postgres://…) to use Postgres; otherwise the SQLite file
+from settings.database_path is used. The same SQL works on both: the
+Postgres adapter rewrites `?` placeholders and returns dict rows.
+"""
 import sqlite3
 from .settings import settings
+
+
+def is_postgres() -> bool:
+    return settings.database_url.strip().lower().startswith(
+        ("postgres://", "postgresql://"))
+
+
+def _ph(sql: str) -> str:
+    """SQLite-style ? placeholders -> psycopg %s."""
+    return sql.replace("?", "%s")
+
+
+def pg_schema() -> str:
+    """SQLite DDL translated to Postgres."""
+    return (SCHEMA
+            .replace("INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY")
+            .replace("datetime('now')",
+                     "to_char(now(), 'YYYY-MM-DD HH24:MI:SS')"))
+
+
+class _PGCursor:
+    def __init__(self, cur):
+        self._cur = cur
+
+    def fetchone(self):
+        return self._cur.fetchone()
+
+    def fetchall(self):
+        return self._cur.fetchall()
+
+
+_pool = None
+
+
+def _pg_url() -> str:
+    url = settings.database_url.strip()
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://"):]
+    return url
+
+
+def _get_pool():
+    """One warm connection pool per process — TLS handshakes are expensive."""
+    global _pool
+    if _pool is None:
+        from psycopg_pool import ConnectionPool
+        from psycopg.rows import dict_row
+        _pool = ConnectionPool(
+            _pg_url(), min_size=1, max_size=5,
+            kwargs={"row_factory": dict_row}, open=True)
+    return _pool
+
+
+class _PGConnection:
+    """Minimal DB-API facade so the SQLite-era call sites stay unchanged."""
+
+    def __init__(self):
+        self._ctx = _get_pool().connection()
+        self._conn = self._ctx.__enter__()
+
+    def execute(self, sql: str, args: tuple = ()):
+        cur = self._conn.cursor()
+        cur.execute(_ph(sql), tuple(args) if args else None)
+        return _PGCursor(cur)
+
+    def executemany(self, sql: str, seq):
+        cur = self._conn.cursor()
+        cur.executemany(_ph(sql), seq)
+        return _PGCursor(cur)
+
+    def executescript(self, script: str):
+        for stmt in script.split(";"):
+            if stmt.strip():
+                self._conn.cursor().execute(stmt)
+
+    def commit(self):
+        self._conn.commit()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self._ctx.__exit__(exc_type, exc, tb)
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS content (
@@ -91,7 +180,7 @@ CREATE TABLE IF NOT EXISTS content_version (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS user (
+CREATE TABLE IF NOT EXISTS users (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     email         TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
@@ -103,7 +192,7 @@ CREATE TABLE IF NOT EXISTS user (
 
 CREATE TABLE IF NOT EXISTS refresh_token (
     jti        TEXT PRIMARY KEY,
-    user_id    INTEGER NOT NULL REFERENCES user(id),
+    user_id    INTEGER NOT NULL REFERENCES users(id),
     expires_at TEXT NOT NULL,
     revoked    INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -111,13 +200,15 @@ CREATE TABLE IF NOT EXISTS refresh_token (
 
 CREATE INDEX IF NOT EXISTS idx_finding_content ON finding(content_id);
 CREATE INDEX IF NOT EXISTS idx_content_status  ON content(status);
-CREATE INDEX IF NOT EXISTS idx_user_email      ON user(email);
+CREATE INDEX IF NOT EXISTS idx_user_email      ON users(email);
 CREATE INDEX IF NOT EXISTS idx_version_content ON content_version(content_id);
 CREATE INDEX IF NOT EXISTS idx_comment_content ON comment(content_id);
 """
 
 
-def get() -> sqlite3.Connection:
+def get():
+    if is_postgres():
+        return _PGConnection()
     from pathlib import Path
     Path(settings.database_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(settings.database_path)
@@ -153,8 +244,27 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute(ddl)
 
 
+def _rename_legacy_user(conn: sqlite3.Connection) -> None:
+    """SQLite DBs created before the Postgres port used a `user` table;
+    Postgres reserves that word, so the table is now `users`."""
+    old = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='user'"
+    ).fetchone()
+    new = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='users'"
+    ).fetchone()
+    if old and not new:
+        conn.execute("ALTER TABLE user RENAME TO users")
+
+
 def init() -> None:
+    if is_postgres():
+        with get() as conn:
+            conn.executescript(pg_schema())
+            conn.commit()
+        return
     with get() as conn:
+        _rename_legacy_user(conn)
         conn.executescript(SCHEMA)
         _migrate(conn)
 

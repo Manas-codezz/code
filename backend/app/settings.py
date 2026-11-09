@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8001
     database_path: str = str(BASE_DIR / "data" / "brandguard.db")
+    database_url: str = ""              # postgres://… (Supabase) overrides path
     upload_dir: str = str(BASE_DIR / "data" / "uploads")
     cors_origins: str = "http://localhost:5173,http://localhost:3000"
     review_rate_per_min: int = 10

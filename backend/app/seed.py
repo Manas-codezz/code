@@ -170,11 +170,11 @@ def ensure_users() -> None:
     from .auth import hash_password
     with db.get() as conn:
         for email, pw, role, team in DEMO_USERS:
-            if conn.execute("SELECT 1 FROM user WHERE email=?",
+            if conn.execute("SELECT 1 FROM users WHERE email=?",
                             (email,)).fetchone():
                 continue
             conn.execute(
-                "INSERT INTO user (email, password_hash, role, team) "
+                "INSERT INTO users (email, password_hash, role, team) "
                 "VALUES (?,?,?,?)",
                 (email, hash_password(pw), role, team))
         conn.commit()
