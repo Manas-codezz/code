@@ -32,6 +32,7 @@ finding and approves → team-level compliance analytics.
 - [Deploy](#deploy)
 - [Project structure](#project-structure)
 - [Troubleshooting](#troubleshooting)
+- [Round 3 status](#round-3-status)
 - [v1.1 roadmap](#v11-roadmap-deliberately-not-built)
 
 ---
@@ -52,6 +53,15 @@ finding and approves → team-level compliance analytics.
   - competitor mentions → critical
   - **amounts not backed by the Fact Store** → critical claim
   - brand-colour distance (Pillow dominant-colour extraction)
+- **Multimodal creative review** (image content, needs `GEMINI_API_KEY`):
+  Gemini reads the creative — OCR text, logo presence, palette clashes —
+  and emits region-tagged findings (`Evidence: Vision OCR (Gemini) ·
+  region: top-left`); a deterministic Pillow pass measures **pixel WCAG
+  contrast** on the headline/footer bands. Text excerpts are grounded in
+  the model's own OCR output (fabricated text is dropped, same discipline
+  as the text engine). Provider chain walks
+  `GEMINI_VISION_MODELS` (default `gemini-3.8-flash,gemini-flash-lite-latest`)
+  and degrades to palette-only if every model fails — review never errors.
 - **RAG**: BM25 retrieval (stdlib, no vector DB) seeds the prompt with the
   3 most relevant guideline chunks + full glossary + fact store.
 - **Evidence on every finding** — `evidence` cites the glossary entry,
@@ -75,6 +85,9 @@ finding and approves → team-level compliance analytics.
 - Publish dispatches an **HMAC-SHA256 signed webhook** (optional target).
 - Image uploads: content-type allowlist, 5MB cap, PIL decode verification,
   UUID filenames (no path traversal), alt text fed into a11y checks.
+  Stored as public `/uploads/…` URLs (served by the app, proxied through
+  Vercel) and uploadable from the **Upload Creative / Replace Image**
+  button on the review page — no API call needed.
 
 ### Knowledge base (the brand's source of truth)
 - Four live tables, editable at runtime (no redeploys):
@@ -109,18 +122,22 @@ finding and approves → team-level compliance analytics.
 - Python **3.12** (uses [uv](https://docs.astral.sh/uv/) or any venv)
 - Node **20+** (pnpm or npm)
 - A Groq API key for live LLM reviews (optional — `mock` mode needs none)
+- A Google Gemini API key for vision review of image creatives (optional —
+  without it, images still get palette + text checks)
 
 ### 1. Backend
 
 ```bash
-# from repo root
+# clone + environment
+git clone https://github.com/varun-pahuja/code.git && cd code
 uv venv --python 3.12
-uv pip install -e "backend[dev]"          # or: pip install -r backend/requirements.txt
+uv pip install -r backend/requirements.txt
 
 # keys live in .env at the repo root (gitignored)
 #   LLM_PROVIDER=groq
 #   GROQ_API_KEY=...
 #   GROQ_MODEL=openai/gpt-oss-120b
+#   GEMINI_API_KEY=...        # optional, vision review of images
 #   JWT_SECRET=...            # required in prod
 #   WEBHOOK_SECRET=...        # optional, signs publish webhooks
 
@@ -214,6 +231,9 @@ real env vars always win). Nothing sensitive is hardcoded.
 | `OPENAI_API_KEY`        | —                                          | fallback provider key                          |
 | `OPENAI_MODEL`          | `gpt-4o`                                   | fallback model                                 |
 | `LLM_TIMEOUT`           | `30.0`                                     | per-request seconds                            |
+| `GEMINI_API_KEY`        | — (vision disabled)                        | Gemini key for image vision review             |
+| `GEMINI_VISION_MODELS`  | `gemini-3.8-flash,gemini-flash-lite-latest` | comma-separated vision failover chain          |
+| `VISION_TIMEOUT`        | `30.0`                                     | per-model vision seconds                       |
 | `DATABASE_PATH`         | `data/brandguard.db`                       | SQLite file (use a volume in prod)             |
 | `UPLOAD_DIR`            | `data/uploads`                             | image uploads                                  |
 | `CORS_ORIGINS`          | `http://localhost:5173,http://localhost:3000` | comma-separated allowlist                  |
@@ -260,7 +280,7 @@ Auth: `Authorization: Bearer <access_token>` (except `/auth/login`,
 | PATCH  | `/findings/{id}`            | token     | `{accepted: 0\|1\|2}` (pending/accept/dismiss) |
 | POST   | `/content/{id}/approve`     | reviewer+ | **409** while any critical finding unresolved |
 | POST   | `/content/{id}/request-changes` | reviewer+ | sets status `changes`                     |
-| POST   | `/content/{id}/upload`      | token     | multipart `file` + `alt`; image only, 5MB, PIL-verified |
+| POST   | `/content/{id}/upload`      | token     | multipart `file` + `alt`; image only, 5MB, PIL-verified; stores a public `/uploads/…` URL |
 | POST   | `/content/{id}/peer-review` | reviewer+ | `{action: approve\|reject, note?}`           |
 | POST   | `/content/{id}/comments`    | token     | `{body, parent_id?}` → 201                   |
 | GET    | `/content/{id}/comments`    | token     | thread list                                   |
@@ -395,13 +415,23 @@ column-level migrations for upgrades.
 | `terminology.py`| glossary regex with word boundaries and exception handling     |
 | `compliance.py` | disclaimer, competitor mentions, amounts-vs-fact-store         |
 | `a11y.py`       | contrast math, HTML structure, reading level                   |
-| `visual.py`     | Pillow dominant colours → brand-palette distance               |
+| `visual.py`     | Pillow dominant colours → brand-palette distance, `resolve_image()` path helper |
+| `vision.py`     | Gemini vision: OCR/logo/palette findings, OCR grounding, pixel WCAG bands |
 | `mock.py`       | deterministic offline findings (tests, CI, no-key demos)       |
+
+Review orchestration that spans these lives in
+`backend/app/review_service.py` (`run_review_on`) — the route and any
+future auto re-review both call it.
 
 ### Provider fallback
 `LLM_PROVIDER=groq` tries Groq, then OpenAI (if keyed), then runs
 deterministic checks only — the API never fails closed because a
 provider is down. `mock` skips the network entirely.
+
+Vision follows the same rule: `engine/vision.py` walks
+`GEMINI_VISION_MODELS` in order (flash tiers intermittently 503 under
+demand; the lite tier absorbs the overflow) and returns no findings if
+every model fails — palette and text checks still run.
 
 ---
 
@@ -416,7 +446,7 @@ no icon pack, no webfonts.
 | -------------- | --------------- | ------------------------------------------------------------- |
 | `#/login`      | Login           | one-click demo accounts, error states                         |
 | `#/dashboard`  | Dashboard       | KPI cards (tabular numerals), 5×3 heat map, team table with CSS bars, overdue list, stale facts, most-violated rules, LLM spend |
-| `#/review/:id` | Review queue    | list + filters + create form · detail: run review, findings with accept/dismiss, approve gate with 409 messaging, peer threads, version diffs |
+| `#/review/:id` | Review queue    | list + filters + create form · detail: run review, image upload/replace button, findings with accept/dismiss, approve gate with 409 messaging, peer threads, version diffs |
 | `#/kb`         | Knowledge base  | 4 tabs, inline add/delete (manager+), JSON export              |
 
 ### Design system — "editorial instrument"
@@ -457,9 +487,9 @@ comment → KB → logout — and fails on any assertion or page error.
 
 | Asset           | Raw      | Gzip    |
 | --------------- | -------- | ------- |
-| JS              | 256 KB   | ~78 KB  |
-| CSS             | 23 KB    | ~5 KB   |
-| build time      | —        | ~0.4 s  |
+| JS              | 371 KB   | ~107 KB |
+| CSS             | 55 KB    | ~10 KB  |
+| build time      | —        | ~0.3 s  |
 
 ---
 
@@ -468,8 +498,8 @@ comment → KB → logout — and fails on any assertion or page error.
 ```bash
 cd backend
 
-# unit + API + workflow tests (mock provider — no API spend)
-../.venv/bin/python -m pytest -q                    # 60 tests
+# unit + API + workflow tests (mock provider — no API spend, no vision spend)
+../.venv/bin/python -m pytest -q                    # 74 tests
 
 # accuracy benchmark against a 12-sample golden set
 ../.venv/bin/python -m bench.evaluate --mock        # offline gate (CI)
@@ -514,7 +544,11 @@ CI (`.github/workflows/ci.yml`) runs on every push/PR: install → pip-audit
   findings are also deduped with severity-aware merge (deterministic
   criticals always win over softer LLM duplicates).
 - **Uploads**: content-type allowlist, 5MB cap, PIL decode+verify,
-  UUID filenames, alt text routed through a11y checks.
+  UUID filenames, alt text routed through a11y checks; stored as public
+  `/uploads/` URLs (never absolute filesystem paths in API responses).
+- **Vision**: Gemini sees only the image + brand palette (no other user
+  data); the model is instructed to ignore instructions embedded in
+  images, and every text excerpt must ground in the model's OCR output.
 - **Rate limiting**: 10 reviews/min/IP sliding window.
 - **Headers**: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
   `Referrer-Policy: no-referrer`, `Cache-Control: no-store`.
@@ -618,17 +652,19 @@ pnpm build                  # static files in dist/
 │   │   ├── models.py        # pydantic contracts (Finding, Analytics, …)
 │   │   ├── kb.py            # knowledge-base CRUD + import/export
 │   │   ├── workflow.py      # comments, versions, diff, publish, peer review
+│   │   ├── review_service.py # shared review runner (route + future re-reviews)
 │   │   └── engine/
 │   │       ├── review.py    # orchestrator: LLM + filters + dedupe
 │   │       ├── llm.py       # Groq → OpenAI → none provider chain
 │   │       ├── retrieval.py # BM25 guideline retrieval (stdlib)
+│   │       ├── vision.py    # Gemini vision + pixel WCAG (model failover)
 │   │       ├── terminology.py / compliance.py / a11y.py / visual.py
 │   │       └── mock.py      # offline deterministic findings
 │   ├── bench/
 │   │   ├── golden_set.json  # 12-sample accuracy corpus
 │   │   ├── evaluate.py      # precision/recall/critical-catch gate
 │   │   └── load_test.py     # concurrency + p95 budget
-│   └── tests/               # 60 tests: api, engine, kb, workflow, ai
+│   └── tests/               # 74 tests: api, engine, kb, workflow, ai, vision
 ├── frontend/
 │   ├── src/
 │   │   ├── App.tsx          # hash router + shell (rail nav, AI banner)
@@ -653,7 +689,8 @@ pnpm build                  # static files in dist/
 | 429 on review | 10/min/IP limit — wait a minute or raise `REVIEW_RATE_PER_MIN`. |
 | 403 on `/analytics/summary` | Analytics requires **manager+** — log in as `manager@brandguard.demo`. |
 | Approve returns 409 | Unresolved critical findings — accept or dismiss each one first (by design). |
-| Tests hit my real database | They don't — `tests/conftest.py` points the app at a temp DB and forces `LLM_PROVIDER=mock`. |
+| Tests hit my real database | They don't — `tests/conftest.py` points the app at a temp DB and forces `LLM_PROVIDER=mock` + an empty `GEMINI_API_KEY`. |
+| Image has no vision findings | `GEMINI_API_KEY` set on the server? Chain logged a failure? Palette findings still run either way — vision degrades, never errors. |
 | Port 8000/5173 busy | Backend: pick another port and keep the frontend proxy in sync (`vite.config.ts`). |
 | Frontend "Failed to fetch" | Start the backend first; the dev server proxies to `localhost:8001`. |
 | Stale demo data | `rm data/brandguard.db` and restart — schema, seed and demo users recreate on boot. |
@@ -661,15 +698,31 @@ pnpm build                  # static files in dist/
 
 ---
 
+## Round 3 status
+
+The three Round 2 jury commitments, delivered as one-at-a-time slices:
+
+| # | Commitment | Status |
+| - | ---------- | ------ |
+| 1 | **Multimodal creative review** — vision OCR/logo/palette findings + pixel WCAG, region-anchored evidence, upload UI | ✅ shipped (`68ed785`, live) |
+| 2 | **One-click auto-remediation + publishing** — bulk apply with diff preview, auto re-review, Slack/signed webhooks, inbound webhook | ⏳ in progress |
+| 3 | **Living KB v2** — PDF/DOCX ingestion, chunk + pgvector embeddings, KB citations in findings, guideline-gap analytics | ⏳ in progress |
+
+Improvement 1 specifics are documented above (vision provider chain,
+`GEMINI_*` settings, upload URL behaviour). Improvements 2–3 build on the
+shared seams already in place: `review_service.run_review_on` (auto
+re-review) and the HMAC-signed publish webhook (Drive/CMS via
+Zapier/Make).
+
+---
+
 ## v1.1 roadmap (deliberately not built)
 
 Multi-tenant RBAC, white-label theming, Redis-backed rate limits,
 logo/template matching, guideline version UI, DDoS/DR runbooks, multi-LLM
-routing policies, SSO, pgvector-backed semantic retrieval (BM25 ships
-today and needs no infrastructure), fine-tuned classifier on reviewed
-history.
+routing policies, SSO, fine-tuned classifier on reviewed history.
 
 ---
 
-**Built for a 2-day hackathon — backend complete (60 tests, live accuracy
+**Built for a 2-day hackathon — backend complete (74 tests, live accuracy
 P=0.83 / R=1.00), frontend complete (smoke-tested end-to-end).**
