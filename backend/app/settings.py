@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4o"
     llm_timeout: float = 30.0
 
+    # vision (Gemini REST; comma-separated failover chain — flash tiers
+    # intermittently 503 under demand, lite absorbs the overflow)
+    gemini_api_key: str = ""
+    gemini_vision_models: str = "gemini-3.8-flash,gemini-flash-lite-latest"
+    vision_timeout: float = 30.0
+
     # auth (full JWT: access + rotating refresh)
     jwt_secret: str = ""                # required in prod; dev fallback below
     jwt_algorithm: str = "HS256"
