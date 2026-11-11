@@ -9,5 +9,6 @@ settings.database_path = str(_tmp / "test.db")
 settings.database_url = ""          # tests always use the temp SQLite file
 settings.upload_dir = str(_tmp / "uploads")
 settings.llm_provider = "mock"   # tests never spend API tokens
+settings.gemini_api_key = ""     # ...nor vision tokens (test_vision re-keys)
 settings.review_rate_per_min = 10_000  # suite runs many reviews; limiter
                                       # has its own test (sets 3 explicitly)

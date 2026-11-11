@@ -327,6 +327,37 @@ def test_upload_rejects_non_image():
     assert r.status_code == 400
 
 
+def test_upload_stores_public_url_and_review_finds_it():
+    """image_path must be a /uploads/ URL (frontend <img src>), and the
+    palette check must still locate the file behind it."""
+    import io as _io
+    from PIL import Image, ImageDraw
+    img = Image.new("RGB", (120, 60), (0, 0, 0))     # pure black: banned
+    ImageDraw.Draw(img).text((5, 5), "X", fill=(255, 255, 255))
+    buf = _io.BytesIO()
+    img.save(buf, format="PNG")
+
+    cid = client.post("/content", headers=hdr("creator"), json={
+        "type": "image", "title": "poster", "text": "", "channel": "web"
+    }).json()["id"]
+    r = client.post(f"/content/{cid}/upload", headers=hdr("creator"),
+                    files={"file": ("poster.png", buf.getvalue(),
+                                    "image/png")})
+    assert r.status_code == 200, r.text
+    path = r.json()["image_path"]
+    assert path.startswith("/uploads/"), path
+
+    from app.engine import visual
+    findings = visual.check(path)
+    assert any("black" in f["rule"].lower() for f in findings), \
+        "palette check must resolve the stored /uploads/ URL"
+
+    # served through the static mount too
+    s = client.get(path)
+    assert s.status_code == 200 and s.headers["content-type"].startswith(
+        "image/")
+
+
 def test_404_paths():
     assert client.get("/content/999999", headers=hdr()).status_code == 404
     assert client.post("/content/999999/review",

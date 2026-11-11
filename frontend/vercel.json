@@ -9,6 +9,7 @@
     { "source": "/analytics/:path*", "destination": "https://branguard-ai.onrender.com/analytics/:path*" },
     { "source": "/audit",            "destination": "https://branguard-ai.onrender.com/audit" },
     { "source": "/audit/:path*",     "destination": "https://branguard-ai.onrender.com/audit/:path*" },
-    { "source": "/health",           "destination": "https://branguard-ai.onrender.com/health" }
+    { "source": "/health",           "destination": "https://branguard-ai.onrender.com/health" },
+    { "source": "/uploads/:path*",   "destination": "https://branguard-ai.onrender.com/uploads/:path*" }
   ]
 }

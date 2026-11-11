@@ -21,8 +21,7 @@ from .settings import settings
 from .models import (ContentCreate, ContentOut, ContentWithFindings, Finding,
                       FindingPatch, ReviewResult, AnalyticsSummary,
                       CategoryCount, TeamScore, TrendPoint, TrendResponse)
-from .engine import review as engine, a11y, visual, compliance
-from . import seed, auth
+from . import seed, auth, review_service
 from .auth import current_user, require_role
 from .kb import router as kb_router
 from .workflow import router as workflow_router
@@ -278,51 +277,7 @@ def run_review(cid: int, request: Request, force_mock: bool = False,
         row = db.one(conn, "SELECT * FROM content WHERE id=?", (cid,))
         if not row:
             raise HTTPException(404, "content not found")
-
-        findings, llm_used, latency, provider, tokens = engine.review(
-            row["text"], use_mock=force_mock)
-
-        def _stamp(items: list[dict], source: str) -> list[Finding]:
-            for d in items:
-                d.setdefault("evidence", source)
-            return [Finding(**d) for d in items]
-
-        findings += _stamp(a11y.check(row["text"]),
-                           "Brand accessibility guideline (WCAG 2.1 AA)")
-        findings += _stamp(
-            compliance.check(row["text"], row["type"]),
-            "Guideline: Claims & Compliance")
-        if row["image_path"]:
-            findings += _stamp(visual.check(row["image_path"]),
-                               "Guideline: Visual Identity")
-
-        conn.execute("DELETE FROM finding WHERE content_id=?", (cid,))
-        for f in findings:
-            conn.execute(
-                "INSERT INTO finding (content_id, category, severity, rule,"
-                " excerpt, suggestion, confidence, evidence)"
-                " VALUES (?,?,?,?,?,?,?,?)",
-                (cid, f.category, f.severity, f.rule, f.excerpt,
-                 f.suggestion, f.confidence, f.evidence))
-        # SLA timer: review window starts at submission
-        due = (datetime.now(timezone.utc)
-               + timedelta(hours=settings.sla_hours)
-               ).strftime("%Y-%m-%d %H:%M:%S")
-        conn.execute(
-            "UPDATE content SET status='review', sla_due_at=?"
-            " WHERE id=? AND status='draft'",
-            (due, cid))
-        db.log_audit(conn, cid, user["email"], "review",
-                     f"{len(findings)} findings ({provider}), {latency}ms",
-                     tokens)
-        conn.commit()
-        stored = db.rows(conn, "SELECT * FROM finding WHERE content_id=? "
-                         "ORDER BY id", (cid,))
-
-    return ReviewResult(content_id=cid, findings=[Finding(**f)
-                                                  for f in stored],
-                        provider=provider, llm_used=llm_used,
-                        latency_ms=latency, tokens=tokens)
+        return review_service.run_review_on(conn, row, user, force_mock)
 
 
 @app.patch("/findings/{fid}", response_model=Finding)
@@ -571,7 +526,7 @@ async def upload_image(cid: int, file: UploadFile = File(...),
         conn.execute(
             "UPDATE content SET image_path=?, text=CASE WHEN text='' "
             "THEN ? ELSE text END, type='image' WHERE id=?",
-            (str(dest), text, cid))
+            (f"/uploads/{safe}", text, cid))   # URL, not filesystem path
         conn.commit()
         return db.one(conn, "SELECT * FROM content WHERE id=?", (cid,))
 

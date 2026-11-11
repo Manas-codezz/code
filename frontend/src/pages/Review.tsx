@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
-import { api, msg, type Content, type Finding, type ReviewResult, type User } from '../api'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { api, msg, upload, type Content, type Finding, type ReviewResult, type User } from '../api'
 import { ROLE_RANK } from '../App'
 import {
   Badge, Btn, Empty, Field, SeverityBadge, StatusChip, inputCls,
@@ -191,6 +191,7 @@ export default function Review({ selected, user }: { selected: string; user: Use
   const [draft, setDraft] = useState(
     { title: '', text: '', channel: 'web', type: 'text' })
   const [comment, setComment] = useState('')
+  const fileRef = useRef<HTMLInputElement>(null)
 
   const cid = Number(selected) || 0
 
@@ -249,6 +250,17 @@ export default function Review({ selected, user }: { selected: string; user: Use
       setResult(r)
       loadDetail(cid)
       loadList()
+    } catch (e) { setErr(msg(e)) } finally { setBusy('') }
+  }
+
+  async function uploadImage(file: File) {
+    if (!file.type.startsWith('image/')) { setErr('File must be an image'); return }
+    if (file.size > 5 * 1024 * 1024) { setErr('Image exceeds 5MB limit'); return }
+    setBusy('upload'); setErr('')
+    try {
+      await upload<Content>(`/content/${cid}/upload`, file)
+      setResult(null)                  // stale text findings; re-run review
+      await Promise.all([loadDetail(cid), loadList()])
     } catch (e) { setErr(msg(e)) } finally { setBusy('') }
   }
 
@@ -695,15 +707,42 @@ export default function Review({ selected, user }: { selected: string; user: Use
                       <pre className="p-5 text-sm leading-relaxed whitespace-pre-wrap font-sans text-ink bg-surface/70">
                         {detail.text || <span className="text-faint italic">(Empty text content — visual asset draft)</span>}
                       </pre>
-                      {detail.image_path && (
-                        <div className="p-5 border-t border-hairline">
+                      <div className="p-5 border-t border-hairline space-y-3">
+                        {detail.image_path && (
                           <img
                             src={detail.image_path}
                             alt=""
                             className="max-h-60 rounded-md border border-hairline"
                           />
+                        )}
+                        <div className="flex items-center gap-3 flex-wrap">
+                          <input
+                            ref={fileRef}
+                            type="file"
+                            accept="image/png,image/jpeg,image/webp"
+                            className="hidden"
+                            onChange={(e) => {
+                              const f = e.target.files?.[0]
+                              if (f) uploadImage(f)
+                              e.target.value = ''
+                            }}
+                          />
+                          <Btn
+                            onClick={() => fileRef.current?.click()}
+                            disabled={busy === 'upload'}
+                          >
+                            {busy === 'upload'
+                              ? 'Uploading…'
+                              : detail.image_path
+                                ? 'Replace Image'
+                                : 'Upload Creative'}
+                          </Btn>
+                          <span className="text-xs text-faint">
+                            PNG/JPG/WEBP · 5MB max · then Run AI Evaluation
+                            for vision + palette findings
+                          </span>
                         </div>
-                      )}
+                      </div>
                     </>
                   )}
                 </section>

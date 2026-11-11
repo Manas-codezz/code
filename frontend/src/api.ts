@@ -172,6 +172,39 @@ export async function api<T = unknown>(
   return r.json() as Promise<T>
 }
 
+/** Multipart upload (image creatives) — same auth + refresh as api(). */
+export async function upload<T = unknown>(
+  path: string,
+  file: File,
+  fields: Record<string, string> = {},
+  retry = true,
+): Promise<T> {
+  const s = loadAuth()
+  const fd = new FormData()
+  fd.append('file', file)
+  for (const [k, v] of Object.entries(fields)) fd.append(k, v)
+
+  const r = await fetch(path, {
+    method: 'POST',
+    headers: s ? { Authorization: `Bearer ${s.access_token}` } : undefined,
+    body: fd,
+  })
+  if (r.status === 401 && s && retry && await tryRefresh()) {
+    return upload<T>(path, file, fields, false)
+  }
+  if (!r.ok) {
+    let m = `${r.status}`
+    try {
+      const d = await r.json()
+      m = d.detail
+        ? (typeof d.detail === 'string' ? d.detail : JSON.stringify(d.detail))
+        : m
+    } catch { /* keep status */ }
+    throw new ApiError(r.status, m)
+  }
+  return r.json() as Promise<T>
+}
+
 export async function login(email: string, password: string): Promise<User> {
   const d = await api<{ access_token: string; refresh_token: string
                         user: User }>('/auth/login', {

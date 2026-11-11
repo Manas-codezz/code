@@ -5,6 +5,19 @@ extract the image's top colours, flag any that are far from every
 approved brand hex (and flag pure black, which the guidelines ban)."""
 from pathlib import Path
 from .. import db
+from ..settings import settings
+
+
+def resolve_image(path: str) -> Path | None:
+    """DB stores the public URL (/uploads/x.png); the file lives in
+    settings.upload_dir. Accepts absolute legacy paths too."""
+    if not path:
+        return None
+    p = Path(path)
+    if p.is_file():
+        return p
+    p = Path(settings.upload_dir) / p.name
+    return p if p.is_file() else None
 
 
 def _hex(rgb: tuple[int, int, int]) -> str:
@@ -35,11 +48,11 @@ def dominant_colors(path: str, k: int = 5) -> list[str]:
 
 def check(path: str, tolerance: float = 0.18) -> list[dict]:
     """tolerance: max normalised RGB distance (0=strict, 1=anything)."""
-    p = Path(path)
-    if not p.exists():
+    p = resolve_image(path)
+    if not p:
         return []
     try:
-        colors = dominant_colors(path)
+        colors = dominant_colors(str(p))
     except Exception:
         return []
 
