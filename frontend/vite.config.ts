@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
 
-const API = 'http://localhost:8001'
+const API = process.env.VITE_API_URL || 'http://localhost:8001'
 const proxied = ['/auth', '/content', '/findings', '/kb', '/analytics',
                  '/audit', '/health', '/comments', '/integrations']
 

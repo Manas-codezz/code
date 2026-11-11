@@ -8,3 +8,10 @@ node_modules/
 frontend/dist/
 frontend/*.png
 uv.lock
+
+# Generated handoff documentation, PDF, and screenshot assets
+BrandGuard_AI_Round3_Handoff.pdf
+*.pdf
+handoff.html
+screenshots/
+scratch/
