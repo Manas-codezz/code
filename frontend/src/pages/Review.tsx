@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, msg, upload, type Content, type Finding, type ReviewResult, type User } from '../api'
+import { api, msg, upload, type Content, type Finding, type ReviewResult, type User, type RemediateResult, type PublishResult } from '../api'
 import { ROLE_RANK } from '../App'
 import {
   Badge, Btn, Empty, Field, SeverityBadge, StatusChip, inputCls,
@@ -99,6 +99,7 @@ function ResolveForm({ commentId, cid, setComments }: {
       >
         Cancel
       </button>
+
     </div>
   )
 }
@@ -185,6 +186,9 @@ export default function Review({ selected, user }: { selected: string; user: Use
   const [comments, setComments] = useState<Comment[]>([])
   const [versions, setVersions] = useState<Version[]>([])
   const [diff, setDiff] = useState<Diff | null>(null)
+  const [remediatePreview, setRemediatePreview] = useState<RemediateResult | null>(null)
+  const [remediateSuccessMsg, setRemediateSuccessMsg] = useState('')
+  const [publishStatus, setPublishStatus] = useState('')
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState('')
   const [showCreate, setShowCreate] = useState(false)
@@ -219,6 +223,9 @@ export default function Review({ selected, user }: { selected: string; user: Use
   useEffect(loadList, [loadList])
   useEffect(() => {
     setResult(null)
+    setRemediatePreview(null)
+    setRemediateSuccessMsg('')
+    setPublishStatus('')
     loadDetail(cid)
   }, [cid, loadDetail])
 
@@ -271,6 +278,71 @@ export default function Review({ selected, user }: { selected: string; user: Use
     const next = base.map((x) => (x.id === updated.id ? updated : x))
     if (result) setResult({ ...result, findings: next })
     else setDetail(detail ? { ...detail, findings: next } : detail)
+  }
+
+  const applicableAccepted = findings.filter(
+    (f) => f.accepted === 1 && f.excerpt && detail?.text && detail.text.includes(f.excerpt)
+  )
+  const applicableAcceptedCount = applicableAccepted.length
+
+  async function handlePreviewRemediate() {
+    if (!cid) return
+    setBusy('remediate')
+    setErr('')
+    try {
+      const res = await api<RemediateResult>(`/content/${cid}/remediate`, {
+        method: 'POST',
+        body: { apply: false }
+      })
+      setRemediatePreview(res)
+    } catch (e) {
+      setErr(msg(e))
+    } finally {
+      setBusy('')
+    }
+  }
+
+  async function handleApplyRemediate() {
+    if (!cid) return
+    const prevCount = findings.length
+    setBusy('remediate')
+    setErr('')
+    try {
+      const res = await api<RemediateResult>(`/content/${cid}/remediate`, {
+        method: 'POST',
+        body: { apply: true }
+      })
+      setRemediatePreview(null)
+      const newCount = res.review?.findings ? res.review.findings.length : 0
+      setRemediateSuccessMsg(`Fixes applied · re-review: ${prevCount} → ${newCount} findings`)
+      if (res.review) setResult(res.review)
+      await Promise.all([loadDetail(cid), loadList()])
+    } catch (e) {
+      setErr(msg(e))
+    } finally {
+      setBusy('')
+    }
+  }
+
+  async function publish() {
+    if (!cid) return
+    setBusy('publish')
+    setErr('')
+    try {
+      const res = await api<PublishResult>(`/content/${cid}/publish`, { method: 'POST' })
+      const wStatus = res.webhook?.sent
+        ? `Webhook: sent ${res.webhook.status || 200}`
+        : (res.webhook?.reason ? `Webhook: ${res.webhook.reason}` : 'Webhook: not configured')
+      const sStatus = res.slack?.sent
+        ? 'Slack: sent'
+        : (res.slack?.reason ? `Slack: ${res.slack.reason}` : 'Slack: not configured')
+      setPublishStatus(`${wStatus} · ${sStatus}`)
+      await Promise.all([loadDetail(cid), loadList()])
+    } catch (e) {
+      setErr(msg(e))
+    } finally {
+      setBusy('')
+    }
   }
 
   async function approve() {
@@ -574,6 +646,7 @@ export default function Review({ selected, user }: { selected: string; user: Use
                     disabled={
                       busy === 'approve' ||
                       detail.status === 'approved' ||
+                      detail.status === 'published' ||
                       unresolvedCriticals.length > 0
                     }
                     title={
@@ -590,14 +663,40 @@ export default function Review({ selected, user }: { selected: string; user: Use
                   <Btn
                     kind="danger"
                     onClick={requestChanges}
-                    disabled={busy === 'rc' || detail.status === 'changes'}
+                    disabled={busy === 'rc' || detail.status === 'changes' || detail.status === 'published'}
                   >
                     Request Changes
                   </Btn>
+                  {detail.status === 'approved' && (
+                    <Btn
+                      kind="primary"
+                      onClick={publish}
+                      disabled={busy === 'publish'}
+                      className="!bg-accent hover:!bg-accent/90"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <Send className="w-3.5 h-3.5" />
+                        <span>{busy === 'publish' ? 'Publishing…' : 'Publish'}</span>
+                      </span>
+                    </Btn>
+                  )}
                     </div>
                   )}
                 </div>
               </div>
+
+              {/* Publish Result Banner */}
+              {publishStatus && (
+                <div className="mt-4 text-xs text-sage bg-sage/10 border border-sage/30 px-4 py-3 rounded-md flex items-center justify-between gap-2.5">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-sage shrink-0" />
+                    <span>{publishStatus}</span>
+                  </div>
+                  <button onClick={() => setPublishStatus('')} className="text-muted hover:text-ink cursor-pointer">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
 
               {/* Approval Gating Banner */}
               {unresolvedCriticals.length > 0 && (
@@ -889,7 +988,7 @@ export default function Review({ selected, user }: { selected: string; user: Use
               <div className="lg:col-span-7 space-y-6">
                 {/* Findings Deck (Generated Evaluation Summary) */}
                 <section data-tour="findings-list" className="bg-surface border border-hairline rounded-lg overflow-hidden backdrop-blur-sm shadow-none">
-                  <header className="px-5 py-3.5 border-b border-hairline flex justify-between items-center bg-surface/40">
+                  <header className="px-5 py-3.5 border-b border-hairline flex justify-between items-center bg-surface/40 flex-wrap gap-2">
                     <div className="flex items-center gap-2.5">
                       <h3 className="text-xs font-semibold uppercase tracking-wider text-ink">
                         Generated Evaluation Summary & Findings
@@ -898,10 +997,45 @@ export default function Review({ selected, user }: { selected: string; user: Use
                         {findings.length}
                       </span>
                     </div>
-                    <span className="text-xs text-muted">
-                      {findings.filter((f) => f.accepted === 1).length} accepted · {findings.filter((f) => f.accepted === 2).length} dismissed
-                    </span>
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs text-muted">
+                        {findings.filter((f) => f.accepted === 1).length} accepted · {findings.filter((f) => f.accepted === 2).length} dismissed
+                      </span>
+                      {canReview && (
+                        <Btn
+                          onClick={handlePreviewRemediate}
+                          disabled={
+                            busy === 'remediate' ||
+                            applicableAcceptedCount === 0 ||
+                            detail?.status === 'approved' ||
+                            detail?.status === 'published'
+                          }
+                          className="!py-1 !px-2.5 !text-xs !bg-accent hover:!bg-accent/90 text-white font-medium shadow-none cursor-pointer"
+                        >
+                          <span className="flex items-center gap-1.5">
+                            <Sparkles className="w-3.5 h-3.5" />
+                            <span>
+                              {busy === 'remediate'
+                                ? 'Applying…'
+                                : `Apply ${applicableAcceptedCount} accepted fix${applicableAcceptedCount === 1 ? '' : 'es'}`}
+                            </span>
+                          </span>
+                        </Btn>
+                      )}
+                    </div>
                   </header>
+
+                  {remediateSuccessMsg && (
+                    <div className="px-5 py-2.5 bg-sage/10 border-b border-sage/20 text-xs text-sage flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-sage shrink-0" />
+                        <span>{remediateSuccessMsg}</span>
+                      </div>
+                      <button onClick={() => setRemediateSuccessMsg('')} className="text-muted hover:text-ink cursor-pointer">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
 
                   {findings.length === 0 && (
                     <div className="p-8">
@@ -996,6 +1130,79 @@ export default function Review({ selected, user }: { selected: string; user: Use
           </div>
         ) : null}
       </div>
+      )}
+      {/* Remediation Diff Modal */}
+      {remediatePreview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="bg-surface border border-hairline rounded-lg w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+            <header className="px-5 py-4 border-b border-hairline flex items-center justify-between bg-surface-2">
+              <div>
+                <h3 className="text-sm font-bold text-ink">Remediation Preview</h3>
+                <p className="text-xs text-muted mt-0.5">
+                  Review proposed before/after diff for accepted fixes
+                </p>
+              </div>
+              <button
+                onClick={() => setRemediatePreview(null)}
+                disabled={busy === 'remediate'}
+                className="text-muted hover:text-ink transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </header>
+
+            <div className="p-5 overflow-y-auto space-y-4">
+              <div className="flex items-center gap-3 text-xs">
+                <span className="px-2.5 py-1 rounded bg-sage/15 text-sage font-medium border border-sage/30">
+                  {remediatePreview.applied.length} applied fix{remediatePreview.applied.length === 1 ? '' : 'es'}
+                </span>
+                {remediatePreview.skipped.length > 0 && (
+                  <span className="px-2.5 py-1 rounded bg-surface-2 text-muted font-medium border border-hairline">
+                    {remediatePreview.skipped.length} skipped (no exact text match)
+                  </span>
+                )}
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-muted">
+                  Unified Diff
+                </div>
+                <pre className="font-mono text-xs bg-surface/90 border border-hairline rounded-md p-4 overflow-x-auto leading-relaxed max-h-80">
+                  {remediatePreview.lines.map((l, i) => (
+                    <div
+                      key={i}
+                      className={
+                        l.startsWith('+')
+                          ? 'text-sage bg-sage/10 px-1 rounded'
+                          : l.startsWith('-')
+                          ? 'text-danger bg-danger/10 px-1 rounded'
+                          : 'text-faint'
+                      }
+                    >
+                      {l}
+                    </div>
+                  ))}
+                </pre>
+              </div>
+            </div>
+
+            <footer className="px-5 py-3.5 border-t border-hairline flex items-center justify-end gap-2.5 bg-surface-2">
+              <Btn
+                onClick={() => setRemediatePreview(null)}
+                disabled={busy === 'remediate'}
+              >
+                Cancel
+              </Btn>
+              <Btn
+                kind="primary"
+                onClick={handleApplyRemediate}
+                disabled={busy === 'remediate'}
+              >
+                {busy === 'remediate' ? 'Applying…' : 'Confirm & Apply'}
+              </Btn>
+            </footer>
+          </div>
+        </div>
       )}
     </div>
   )

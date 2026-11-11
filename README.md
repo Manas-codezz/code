@@ -705,7 +705,7 @@ The three Round 2 jury commitments, delivered as one-at-a-time slices:
 | # | Commitment | Status |
 | - | ---------- | ------ |
 | 1 | **Multimodal creative review** — vision OCR/logo/palette findings + pixel WCAG, region-anchored evidence, upload UI | ✅ shipped (`68ed785`, live) |
-| 2 | **One-click auto-remediation + publishing** — bulk apply with diff preview, auto re-review, Slack/signed webhooks, inbound webhook | ⏳ in progress |
+| 2 | **One-click auto-remediation + publishing** — bulk apply with diff preview, auto re-review, Slack/signed webhooks, inbound webhook | ✅ shipped |
 | 3 | **Living KB v2** — PDF/DOCX ingestion, chunk + pgvector embeddings, KB citations in findings, guideline-gap analytics | ⏳ in progress |
 
 Improvement 1 specifics are documented above (vision provider chain,

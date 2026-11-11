@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     # integration
     webhook_url: str = ""               # publish webhook target ("" = skip)
     webhook_secret: str = ""            # HMAC-SHA256 signing secret
+    slack_webhook_url: str = ""         # Slack incoming webhook URL ("" = skip)
 
     @property
     def origins(self) -> list[str]:
