@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     gemini_vision_models: str = "gemini-3.8-flash,gemini-flash-lite-latest"
     vision_timeout: float = 30.0
 
+    # embedding (Gemini → local fallback; 256‑dim portable vectors)
+    embed_model: str = "gemini-embedding-001"
+    embed_dim: int = 256
+
     # auth (full JWT: access + rotating refresh)
     jwt_secret: str = ""                # required in prod; dev fallback below
     jwt_algorithm: str = "HS256"

@@ -5,7 +5,10 @@ from settings.database_path is used. The same SQL works on both: the
 Postgres adapter rewrites `?` placeholders and returns dict rows.
 """
 import sqlite3
+import logging
 from .settings import settings
+
+log = logging.getLogger("brandguard.db")
 
 
 def is_postgres() -> bool:
@@ -198,6 +201,15 @@ CREATE TABLE IF NOT EXISTS refresh_token (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS kb_chunk (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    source      TEXT NOT NULL,
+    chunk_index INTEGER NOT NULL,
+    text        TEXT NOT NULL,
+    embedding   TEXT NOT NULL,          -- JSON vector (portable truth)
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_finding_content ON finding(content_id);
 CREATE INDEX IF NOT EXISTS idx_content_status  ON content(status);
 CREATE INDEX IF NOT EXISTS idx_user_email      ON users(email);
@@ -259,9 +271,21 @@ def _rename_legacy_user(conn: sqlite3.Connection) -> None:
 
 def init() -> None:
     if is_postgres():
-        with get() as conn:
-            conn.executescript(pg_schema())
-            conn.commit()
+        vector_enabled = False
+        try:
+            with get() as conn:
+                conn.executescript(pg_schema())
+                conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
+                conn.execute(
+                    "ALTER TABLE kb_chunk ADD COLUMN IF NOT EXISTS "
+                    "embedding_vec vector(%s)" % settings.embed_dim)
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS kb_chunk_vec_idx "
+                    "ON kb_chunk USING hnsw (embedding_vec vector_cosine_ops)")
+                conn.commit()
+                vector_enabled = True
+        except Exception as e:  # no permission -> JSON-only mode
+            log.warning("pgvector unavailable, cosine-in-Python: %s", e)
         return
     with get() as conn:
         _rename_legacy_user(conn)

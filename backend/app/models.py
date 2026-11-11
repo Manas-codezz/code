@@ -106,3 +106,4 @@ class AnalyticsSummary(BaseModel):
     heat_map: list[dict] = []          # category x severity matrix
     overdue_reviews: list[dict] = []   # SLA breaches
     stale_facts: list[dict] = []       # fact store freshness gaps
+    guideline_gaps: list[dict] = []    # KB coverage gaps per category

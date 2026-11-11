@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 
 from . import db
 from .settings import settings
+from .engine.citation import guideline_gaps
 from .models import (ContentCreate, ContentOut, ContentWithFindings, Finding,
                       FindingPatch, ReviewResult, AnalyticsSummary,
                       CategoryCount, TeamScore, TrendPoint, TrendResponse)
@@ -442,6 +443,18 @@ def analytics(user: dict = Depends(require_role("manager"))):
                 stale.append({**r, "days_old": days_old})
         stale.sort(key=lambda s: s["days_old"], reverse=True)
 
+    # guideline-gap analytics: categories with findings but no KB citation
+    all_gaps: dict[str, int] = {}
+    for r in db.rows(conn, "SELECT id, text FROM content WHERE text != ''"):
+        gaps = guideline_gaps(r["id"])
+        for g in gaps:
+            all_gaps[g["category"]] = all_gaps.get(g["category"], 0) + (1 if g["missing_passages"] else 0)
+
+    gap_summary = [
+        {"category": cat, "count": cnt, "missing": all_gaps[cat] > 0}
+        for cat, cnt in sorted(all_gaps.items())
+    ]
+
     # compliance = approved content with zero unresolved criticals
     compliant = approved
     rate = round(compliant / total * 100, 1) if total else 0.0
@@ -452,7 +465,8 @@ def analytics(user: dict = Depends(require_role("manager"))):
         most_violated_rules=rules, findings_by_severity=by_sev,
         llm_calls=cost.get("calls", 0), total_tokens=cost.get("tok", 0),
         by_team=by_team, heat_map=heat_map,
-        overdue_reviews=overdue, stale_facts=stale)
+        overdue_reviews=overdue, stale_facts=stale,
+        guideline_gaps=gap_summary)
 
 
 @app.get("/analytics/trend", response_model=TrendResponse)

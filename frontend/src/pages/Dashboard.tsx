@@ -366,29 +366,46 @@ function ManagerDashboard() {
               </div>
             </Section>
 
-            <Section tourId="chart-categories" title="Findings by category"
+<Section tourId="chart-categories" title="Findings by category"
                      right={<span className="text-[11px] text-faint">all time</span>}>
-              {d.by_category.length === 0 ? (
-                <Empty>No findings recorded.</Empty>
-              ) : (
+               {d.by_category.length === 0 ? (
+                 <Empty>No findings recorded.</Empty>
+               ) : (
+                 <div className="space-y-3">
+                   {d.by_category.map((c, i) => {
+                     const max = Math.max(...d.by_category.map((x) => x.count), 1)
+                     return (
+                       <div key={c.category}
+                            className="grid grid-cols-[72px_1fr_40px] items-center gap-3 text-xs">
+                         <span className="text-muted capitalize">{c.category}</span>
+                         <Bar value={c.count} max={max}
+                              tone={i % 2 ? 'accent' : 'ink'} />
+                         <span className="tabular-nums text-right text-ink font-semibold">
+                           {c.count}
+                         </span>
+                       </div>
+                     )
+                   })}
+                 </div>
+               )}
+             </Section>
+
+            {d.guideline_gaps.length > 0 && (
+              <Section tourId="guideline-gaps" title="Guideline gaps"
+                       right={<span className="text-[11px] text-faint">coverage</span>}>
                 <div className="space-y-3">
-                  {d.by_category.map((c, i) => {
-                    const max = Math.max(...d.by_category.map((x) => x.count), 1)
-                    return (
-                      <div key={c.category}
-                           className="grid grid-cols-[72px_1fr_40px] items-center gap-3 text-xs">
-                        <span className="text-muted capitalize">{c.category}</span>
-                        <Bar value={c.count} max={max}
-                             tone={i % 2 ? 'accent' : 'ink'} />
-                        <span className="tabular-nums text-right text-ink font-semibold">
-                          {c.count}
-                        </span>
-                      </div>
-                    )
-                  })}
+                  {d.guideline_gaps.map((g, i) => (
+                    <div key={g.category}
+                         className="grid grid-cols-[ auto_1fr_30px ] items-center gap-2 text-xs p-2 rounded-md hover:bg-surface-2 transition-colors">
+                      <span className="text-muted capitalize">{g.category}</span>
+                      <span className={`text-${g.missing ? 'danger' : 'sague'} font-medium text-[10px] shrink-0`}
+                        title={g.missing ? 'No KB passage found' : 'Covered'}>{g.missing ? '✗' : '✓'}</span>
+                      <span className="tabular-nums text-right text-ink font-semibold">{g.count}</span>
+                    </div>
+                  ))}
                 </div>
-              )}
-            </Section>
+              </Section>
+            )}
           </div>
         </div>
       )}

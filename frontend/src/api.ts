@@ -89,6 +89,7 @@ export interface Analytics {  total_content: number
                      sla_due_at: string; hours_late: number }[]
   stale_facts: { id: number; claim: string; source: string
                  verified_at: string; days_old: number }[]
+  guideline_gaps: { category: string; count: number; missing: boolean }[]
 }
 
 const KEY = 'bg.auth'
@@ -216,6 +217,26 @@ export async function upload<T = unknown>(
     throw new ApiError(r.status, m)
   }
   return r.json() as Promise<T>
+}
+
+export async function ingestGuidelines(file: File): Promise<{chunks: number; status: string}> {
+  const fd = new FormData()
+  fd.append('file', file)
+  const r = await fetch('/kb/ingest', {
+    method: 'POST',
+    body: fd,
+  })
+  if (!r.ok) {
+    let m = `${r.status}`
+    try {
+      const d = await r.json()
+      m = d.detail
+        ? (typeof d.detail === 'string' ? d.detail : JSON.stringify(d.detail))
+        : m
+    } catch { /* keep status */ }
+    throw new ApiError(r.status, m)
+  }
+  return r.json() as Promise<{chunks: number; status: string}>
 }
 
 export async function login(email: string, password: string): Promise<User> {

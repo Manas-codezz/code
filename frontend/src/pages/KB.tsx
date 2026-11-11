@@ -34,6 +34,8 @@ export default function KB({ user }: { user: User }) {
   const [adding, setAdding] = useState(false)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
+  const [ingestBusy, setIngestBusy] = useState(false)
+  const [ingestErr, setIngestErr] = useState('')
 
   const canWrite = ROLE_RANK[user.role] >= ROLE_RANK.manager
   const spec = KINDS.find((k) => k.id === kind)!
@@ -74,6 +76,17 @@ export default function KB({ user }: { user: User }) {
     URL.revokeObjectURL(a.href)
   }
 
+  async function ingestFile() {
+    if (!file) return
+    setIngestBusy(true); setIngestErr('')
+    try {
+      const result = await api(`/kb/ingest`, { body: file, retry: false })
+      setIngestStatus(`Ingested ${result.chunks} chunks into KB`)
+      setFile(null)
+      load(kind)
+    } catch (e) { setIngestErr(msg(e)) } finally { setIngestBusy(false) }
+  }
+
   return (
     <div className="space-y-6">
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -92,14 +105,50 @@ export default function KB({ user }: { user: User }) {
               <span>Export JSON</span>
             </span>
           </Btn>
-          {canWrite && (
-            <Btn kind="primary" onClick={() => setAdding((a) => !a)}>
-              <span className="flex items-center gap-1.5">
-                {adding ? <X className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
-                <span>{adding ? 'Cancel' : 'Add Entry'}</span>
-              </span>
+{canWrite && (
+        <Btn kind="primary" onClick={() => setAdding((a) => !a)}>
+          <span className="flex items-center gap-1.5">
+            {adding ? <X className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+            <span>{adding ? 'Cancel' : 'Add Entry'}</span>
+          </span>
+        </Btn>
+      )}
+      {canWrite && (
+        <div className="mt-4 p-4 bg-surface-2 border border-hairline rounded-lg">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted mb-3">
+            Living KB v2 — Guideline Document Ingestion
+          </h3>
+          <p className="text-xs text-muted mb-2">
+            Upload brand guideline PDF or DOCX to auto-chunk and embed into the knowledge base.
+          </p>
+          <input
+            type="file"
+            accept=".pdf,.docx"
+            className="file-input mt-2 block cursor-pointer bg-surface-2 rounded border border-hairline text-sm px-3 py-2"
+            onChange={(e) => setFile(e.target.files[0])}
+          />
+          {file && (
+            <div className="mt-2 text-xs text-ink">
+              Selected: {file.name}
+            </div>
+          )}
+          {file && (
+            <Btn kind="secondary" onClick={ingestFile} disabled={ingestBusy}>
+              {ingestBusy ? 'Ingesting…' : 'Ingest Document'}
             </Btn>
           )}
+          {ingestErr && (
+            <div className="text-xs text-danger mt-2">
+              {ingestErr}
+            </div>
+          )}
+          {ingestStatus && (
+            <div className="text-xs text-sage mt-2">
+              {ingestStatus}
+            </div>
+          )}
+        </div>
+      )}
         </div>
       </header>
 

@@ -1,11 +1,14 @@
 """RAG-lite: BM25 retrieval over brand-guideline chunks (stdlib only — no
 vector DB needed at this scale; swap for pgvector when the KB outgrows
-prompt budget).
+prompt budget). Also supports pgvector cosine retrieval for kb_chunk.
 
 Glossary + facts stay pinned in every prompt (exact-match data retrieval
 can't miss); only the long guideline bodies are ranked/retrieved."""
 import re
+import json
 from .. import db
+from .embed import embed_texts
+from ..db import is_postgres as _is_postgres
 
 _TOKEN = re.compile(r"[a-z0-9']+")
 K1, B = 1.5, 0.75
@@ -41,6 +44,49 @@ def bm25_rank(query_tokens: list[str],
                 freq + K1 * (1 - B + B * len(d) / avgdl))
         scores.append(s)
     return scores
+
+
+def _cosine_sim(a: list[float], b: list[float]) -> float:
+    """Cosine similarity between two unit vectors."""
+    if not a or not b:
+        return 0.0
+    import math
+    num = sum(x * y for x, y in zip(a, b))
+    den = (sum(x * x for x in a) * sum(y * y for y in b)) ** 0.5
+    return num / den if den else 0.0
+
+
+def pgvector_cosine(conn, query_vec: list[float], top_k: int = 3) -> list[dict]:
+    """Postgres-only: ORDER BY embedding_vec <=> %s::vector; return top_k rows."""
+    rows_ = db.rows(conn, (
+        "SELECT id, source, chunk_index, text, embedding, "
+        "embedding_vec <=> %s::vector AS cosn "
+        "FROM kb_chunk ORDER BY cosn LIMIT %s"), 
+        (json.dumps(query_vec), top_k))
+    return rows_
+
+
+def python_cosine(conn, query_vec: list[float], top_k: int = 3) -> list[dict]:
+    """SQLite/JSON fallback: compute cosine similarity in Python over the JSON embedding."""
+    rows_ = db.rows(conn, "SELECT id, source, chunk_index, text, embedding FROM kb_chunk")
+    scored = []
+    for r in rows_:
+        stored = json.loads(r["embedding"])
+        sim = _cosine_sim(query_vec, stored)
+        scored.append((sim, r))
+    scored.sort(key=lambda x: -x[0])
+    return [r for _, r in scored[:top_k]]
+
+
+def relevant_kb_chunks(content: str, top_k: int = 3) -> list[dict]:
+    """Guideline KB chunks most relevant to this content (semantic retrieval)."""
+    with db.get() as conn:
+        if _is_postgres():
+            vec = embed_texts([content])[0]
+            return pgvector_cosine(conn, vec, top_k)
+        else:
+            vec = embed_texts([content])[0]
+            return python_cosine(conn, vec, top_k)
 
 
 def relevant_guidelines(content: str, top_k: int = 3) -> list[dict]:
