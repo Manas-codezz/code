@@ -10,6 +10,7 @@ from fastapi import HTTPException
 
 from . import db
 from .settings import settings
+from .engine.citation import cite_findings
 from .models import Finding, ReviewResult
 from .engine import review as engine, a11y, compliance, visual, vision
 
@@ -39,8 +40,22 @@ def run_review_on(conn, row: dict, user: dict,
         findings += _stamp(vision_findings,
                            "Vision OCR + pixel WCAG (Gemini)")
         tokens += vision_tokens
+        # Citations: map findings to most relevant kb_chunk passages
+        citations = cite_findings(cid, row["text"])
+        for c in citations:
+            # Append KB citation source to finding evidence
+            for f in findings:
+                if f.evidence and c["citation_source"]:
+                    f.evidence = f"{f.evidence} | KB: {c['citation_source']}"
+                elif c["citation_source"]:
+                    f.evidence = c["citation_source"]
 
     conn.execute("DELETE FROM finding WHERE content_id=?", (cid,))
+    # Attach KB source citations to findings
+    for c in cite_findings(cid, row["text"]):
+        for f in findings:
+            if f.id == c["finding_id"]:
+                f.evidence = c["citation_source"] or f.evidence
     for f in findings:
         conn.execute(
             "INSERT INTO finding (content_id, category, severity, rule,"

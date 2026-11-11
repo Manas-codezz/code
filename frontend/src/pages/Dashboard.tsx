@@ -394,7 +394,7 @@ function ManagerDashboard() {
               <Section tourId="guideline-gaps" title="Guideline gaps"
                        right={<span className="text-[11px] text-faint">coverage</span>}>
                 <div className="space-y-3">
-                  {d.guideline_gaps.map((g, i) => (
+                  {d.guideline_gaps.map((g) => (
                     <div key={g.category}
                          className="grid grid-cols-[ auto_1fr_30px ] items-center gap-2 text-xs p-2 rounded-md hover:bg-surface-2 transition-colors">
                       <span className="text-muted capitalize">{g.category}</span>

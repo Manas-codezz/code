@@ -36,6 +36,8 @@ export default function KB({ user }: { user: User }) {
   const [busy, setBusy] = useState(false)
   const [ingestBusy, setIngestBusy] = useState(false)
   const [ingestErr, setIngestErr] = useState('')
+  const [ingestStatus, setIngestStatus] = useState('')
+  const [file, setFile] = useState<File | null>(null)
 
   const canWrite = ROLE_RANK[user.role] >= ROLE_RANK.manager
   const spec = KINDS.find((k) => k.id === kind)!
@@ -76,11 +78,29 @@ export default function KB({ user }: { user: User }) {
     URL.revokeObjectURL(a.href)
   }
 
-  async function ingestFile() {
+async function ingestFile() {
     if (!file) return
     setIngestBusy(true); setIngestErr('')
+    const s = loadAuth()
+    const fd = new FormData()
+    fd.append('file', file)
     try {
-      const result = await api(`/kb/ingest`, { body: file, retry: false })
+      const r = await fetch('/kb/ingest', {
+        method: 'POST',
+        headers: s ? { Authorization: `Bearer ${s.access_token}` } : undefined,
+        body: fd,
+      })
+      if (!r.ok) {
+        let m = `${r.status}`
+        try {
+          const d = await r.json()
+          m = d.detail
+            ? (typeof d.detail === 'string' ? d.detail : JSON.stringify(d.detail))
+            : m
+        } catch { /* keep status */ }
+        throw new ApiError(r.status, m)
+      }
+      const result: {chunks: number; status: string} = await r.json()
       setIngestStatus(`Ingested ${result.chunks} chunks into KB`)
       setFile(null)
       load(kind)
@@ -133,7 +153,7 @@ export default function KB({ user }: { user: User }) {
             </div>
           )}
           {file && (
-            <Btn kind="secondary" onClick={ingestFile} disabled={ingestBusy}>
+            <Btn kind="ghost" onClick={ingestFile} disabled={ingestBusy}>
               {ingestBusy ? 'Ingesting…' : 'Ingest Document'}
             </Btn>
           )}

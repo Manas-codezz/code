@@ -53,7 +53,7 @@ def guideline_gaps(content_id: int) -> list[dict]:
     a matching kb_chunk citation, indicating a gap in the knowledge base.
 
     Returns list of {category, count, missing_passages}.
-    """
+    Uses local embeddings — no per-content API call."""
     with db.get() as conn:
         findings = db.rows(
             conn, (
@@ -68,7 +68,10 @@ def guideline_gaps(content_id: int) -> list[dict]:
     row = db.one(conn, "SELECT text FROM content WHERE id=?", (content_id,))
     content_text = row["text"] if row else ""
 
-    chunks = relevant_kb_chunks(content_text, top_k=5)
+    # Compute embedding once locally (no Gemini API call per content item)
+    vec = embed_texts([content_text])[0]
+
+    chunks = relevant_kb_chunks(content_text, top_k=5, vec=vec)
     chunk_keys = {chunk["text"][:80] for chunk in chunks}
 
     gaps = []

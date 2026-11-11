@@ -3,12 +3,23 @@ plus bulk import (onboarding wizard) and export (backup/versioning).
 
 Read = any authenticated role (creators must be able to consult the KB);
 write/delete = manager+. Dict bodies keep /docs honest without Pydantic
-boilerplate for four near-identical tables."""
+boilerplate for four near-identical tables.
+
+Also: ingest guideline PDFs/DOCX, auto-chunk+embed into kb_chunk, and
+       persist 256-d vectors (Gemini API or local zlib.crc32 fallback).
+"""
+import io
+import json
 import re
-from fastapi import APIRouter, Depends, HTTPException
+import zlib
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi.responses import JSONResponse
 
 from . import db
 from .auth import current_user, require_role
+from .settings import settings
 
 router = APIRouter(prefix="/kb", tags=["knowledge base"])
 
@@ -72,8 +83,76 @@ def bulk_import(body: dict, user: dict = Depends(require_role("manager"))):
             added[kind] = n
         db.log_audit(conn, None, user["email"], "kb_import",
                      f"added={added} skipped={skipped}")
-        conn.commit()
+    conn.commit()
     return {"added": added, "skipped": skipped}
+
+
+async def _read_file_text(upload: UploadFile) -> str:
+    """Read uploaded file as text, supporting PDF and DOCX."""
+    data = await upload.read()
+    if not data:
+        return ""
+    # PDF via pypdf
+    try:
+        import pypdf
+        reader = pypdf.PdfReader(io.BytesIO(data))
+        return " ".join(page.extract_text() or "" for page in reader.pages)
+    except Exception:
+        pass
+    # DOCX via python-docx
+    try:
+        import docx
+        doc = docx.Document(io.BytesIO(data))
+        return " ".join(paragraph.text or "" for paragraph in doc.paragraphs)
+    except Exception:
+        pass
+    # Fallback: treat as plain text
+    return data.decode("utf-8", errors="ignore")
+
+
+@router.post("/ingest", name="kb_ingest")
+async def kb_ingest(
+    upload: UploadFile = File(...),
+    user: dict = Depends(require_role("manager")),
+):
+    """Ingest a brand guideline PDF or DOCX.
+
+    - Extracts text
+    - Chunks into ~1000 character segments with 150 overlap
+    - Embeds each chunk (Gemini API or local zlib.crc32 fallback)
+    - Inserts kb_chunk rows (JSON embedding + optional pgvector HNSW index)
+    Returns {"chunks": N, "status": "ok"} on success.
+    """
+    text = await _read_file_text(upload)
+    if not text.strip():
+        return {"chunks": 0, "status": "no text found"}
+    # Chunk: ~1000 chars, 150 overlap
+    chunk_size = 1000
+    chunk_overlap = 150
+    chunks_texts = []
+    for i in range(0, len(text), chunk_size - chunk_overlap):
+        chunk = text[i : i + chunk_size]
+        if chunk.strip():
+            chunks_texts.append(chunk)
+    if not chunks_texts:
+        return {"chunks": 0, "status": "no usable chunks"}
+    # Embed chunks (Gemini if key available, else deterministic local)
+    from .engine.embed import embed_texts
+    embeddings = embed_texts(chunks_texts)  # list[list[float]]
+    # Insert kb_chunk rows
+    added = 0
+    with db.get() as conn:
+        for i, (chunk, vec) in enumerate(zip(chunks_texts, embeddings)):
+            vec_json = json.dumps(vec)
+            # portable JSON column always works; pgvector column added later if available
+            conn.execute(
+                """INSERT INTO kb_chunk (source, chunk_index, text, embedding)
+                   VALUES (%s, %s, %s, %s)""",
+                ("ingest", i, chunk, vec_json),
+            )
+            added += 1
+        conn.commit()
+    return {"chunks": added, "status": "ok"}
 
 
 # --- per-table CRUD (generated from SPEC, one code path) -------------------

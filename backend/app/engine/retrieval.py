@@ -57,13 +57,9 @@ def _cosine_sim(a: list[float], b: list[float]) -> float:
 
 
 def pgvector_cosine(conn, query_vec: list[float], top_k: int = 3) -> list[dict]:
-    """Postgres-only: ORDER BY embedding_vec <=> %s::vector; return top_k rows."""
-    rows_ = db.rows(conn, (
-        "SELECT id, source, chunk_index, text, embedding, "
-        "embedding_vec <=> %s::vector AS cosn "
-        "FROM kb_chunk ORDER BY cosn LIMIT %s"), 
-        (json.dumps(query_vec), top_k))
-    return rows_
+    """Postgres-only: use JSON embedding column with Python cosine (pgvector column pending)."""
+    # embedding_vec column not yet populated; fall through to python_cosine path
+    return python_cosine(conn, query_vec, top_k)
 
 
 def python_cosine(conn, query_vec: list[float], top_k: int = 3) -> list[dict]:
@@ -78,15 +74,14 @@ def python_cosine(conn, query_vec: list[float], top_k: int = 3) -> list[dict]:
     return [r for _, r in scored[:top_k]]
 
 
-def relevant_kb_chunks(content: str, top_k: int = 3) -> list[dict]:
-    """Guideline KB chunks most relevant to this content (semantic retrieval)."""
+def relevant_kb_chunks(content: str, top_k: int = 3, vec: list[float] | None = None) -> list[dict]:
+    """Guideline KB chunks most relevant to this content (semantic retrieval).
+    If vec is pre-computed, no embedding API call is made.
+    Uses Python cosine over JSON embedding; pgvector path pending vector-column pop."""
     with db.get() as conn:
-        if _is_postgres():
+        if vec is None:
             vec = embed_texts([content])[0]
-            return pgvector_cosine(conn, vec, top_k)
-        else:
-            vec = embed_texts([content])[0]
-            return python_cosine(conn, vec, top_k)
+        return python_cosine(conn, vec, top_k)
 
 
 def relevant_guidelines(content: str, top_k: int = 3) -> list[dict]:

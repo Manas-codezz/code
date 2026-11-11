@@ -45,10 +45,12 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
         return [_local(t) for t in texts]
 
 
+import zlib
+
 def _local(t: str) -> list[float]:
-    """Deterministic 256‑d hashed bag‑of‑words, L2‑normalised."""
+    """Deterministic 256-d crc32 bag-of-words, L2‑normalised."""
     v = [0.0] * EMBED_DIM
     for tok in tokenize(t):
-        v[hash(tok) % EMBED_DIM] += 1.0
+        v[zlib.crc32(tok.encode()) % EMBED_DIM] += 1.0
     n = sum(x * x for x in v) ** 0.5 or 1.0
     return [x / n for x in v]

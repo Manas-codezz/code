@@ -271,19 +271,16 @@ def _rename_legacy_user(conn: sqlite3.Connection) -> None:
 
 def init() -> None:
     if is_postgres():
-        vector_enabled = False
         try:
             with get() as conn:
                 conn.executescript(pg_schema())
                 conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
-                conn.execute(
-                    "ALTER TABLE kb_chunk ADD COLUMN IF NOT EXISTS "
-                    "embedding_vec vector(%s)" % settings.embed_dim)
+                # embedding_vec column added later when ingest reliably populates it
+                log.info("pgvector enabled; embedding_vec column pending ingest")
                 conn.execute(
                     "CREATE INDEX IF NOT EXISTS kb_chunk_vec_idx "
-                    "ON kb_chunk USING hnsw (embedding_vec vector_cosine_ops)")
+                    "ON kb_chunk USING hnsw (embedding vector_cosine_ops)")
                 conn.commit()
-                vector_enabled = True
         except Exception as e:  # no permission -> JSON-only mode
             log.warning("pgvector unavailable, cosine-in-Python: %s", e)
         return
