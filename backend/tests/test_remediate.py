@@ -235,3 +235,18 @@ def test_inbound_webhook_unknown_action():
                     headers={"X-BrandGuard-Signature": sig, "Content-Type": "application/json"})
     assert r.status_code == 400
     assert "unknown action" in r.json()["detail"]
+
+
+def test_inbound_webhook_unset_secret():
+    old = settings.webhook_secret
+    settings.webhook_secret = ""
+    try:
+        body = json.dumps({"action": "review", "content_id": 1}).encode()
+        # Even with an empty secret and valid sha256 for empty key, it must return 503
+        sig = "sha256=" + hmac.new(b"", body, hashlib.sha256).hexdigest()
+        r = client.post("/integrations/inbound", content=body,
+                        headers={"X-BrandGuard-Signature": sig, "Content-Type": "application/json"})
+        assert r.status_code == 503
+        assert "webhook_secret is unset" in r.json()["detail"]
+    finally:
+        settings.webhook_secret = old

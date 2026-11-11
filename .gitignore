@@ -15,3 +15,7 @@ BrandGuard_AI_Round3_Handoff.pdf
 handoff.html
 screenshots/
 scratch/
+
+# Lockfile churn
+package-lock.json
+frontend/package-lock.json

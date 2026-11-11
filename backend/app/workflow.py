@@ -72,22 +72,10 @@ def _dispatch_slack(row: dict, email: str) -> dict:
         return {"sent": False, "error": str(e)[:120]}
 
 
-# In-memory sliding-window rate limit for inbound webhook
-_rate_hits: dict[str, deque] = defaultdict(deque)
-
-
 def _rate_limit(request: Request) -> None:
-    now = time.time()
-    ip = request.client.host if request.client else "unknown"
-    q = _rate_hits[ip]
-    while q and now - q[0] > 60:
-        q.popleft()
-    if len(q) >= settings.review_rate_per_min:
-        raise HTTPException(
-            429, "Rate limit exceeded "
-                 f"({settings.review_rate_per_min}/min per IP). "
-                 "Try again in a minute.")
-    q.append(now)
+    # Delegate to main.py's rate_limit to share the in-memory window across all endpoints
+    from .main import rate_limit
+    rate_limit(request)
 
 
 class PeerBody(BaseModel):
@@ -325,6 +313,8 @@ def publish(cid: int, user: dict = Depends(require_role("manager"))):
 async def inbound_webhook(request: Request):
     """External tools (CI, Drive, CMS) trigger review, approval, or publish via HMAC."""
     _rate_limit(request)
+    if not settings.webhook_secret:
+        raise HTTPException(503, "inbound webhook not configured: webhook_secret is unset")
     body_bytes = await request.body()
     sig_header = request.headers.get("X-BrandGuard-Signature", "")
     if not sig_header:
