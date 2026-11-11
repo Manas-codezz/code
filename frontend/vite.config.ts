@@ -5,7 +5,7 @@ import path from 'path'
 
 const API = 'http://localhost:8001'
 const proxied = ['/auth', '/content', '/findings', '/kb', '/analytics',
-                 '/audit', '/health', '/comments']
+                 '/audit', '/health', '/comments', '/integrations']
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],

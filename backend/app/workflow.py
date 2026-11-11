@@ -1,11 +1,13 @@
 """Collaborative workflow: peer review, comment threads, version history
 with side-by-side diff data, SLA publishing, signed webhooks, audit verify."""
+from collections import defaultdict, deque
 import difflib
 import hashlib
 import hmac
 import json
+import time
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from . import db
@@ -50,9 +52,42 @@ def _dispatch_webhook(event: str, cid: int, extra: dict) -> dict:
                        headers={"X-BrandGuard-Signature": f"sha256={sig}",
                                 "Content-Type": "application/json"},
                        timeout=3.0)
-        return {"sent": r.ok, "status": r.status_code}
+        return {"sent": r.is_success, "status": r.status_code}
     except Exception as e:                       # webhook must never block publish
         return {"sent": False, "error": str(e)[:120]}
+
+
+def _dispatch_slack(row: dict, email: str) -> dict:
+    """Post publication alert to Slack ("" = disabled). Never raises."""
+    if not settings.slack_webhook_url:
+        return {"sent": False, "reason": "slack_webhook_url not configured"}
+    payload = {
+        "text": f" BrandGuard published *{row['title']}* ({row['channel']}) by {email}"
+    }
+    try:
+        import httpx
+        r = httpx.post(settings.slack_webhook_url, json=payload, timeout=3.0)
+        return {"sent": r.is_success, "status": r.status_code}
+    except Exception as e:
+        return {"sent": False, "error": str(e)[:120]}
+
+
+# In-memory sliding-window rate limit for inbound webhook
+_rate_hits: dict[str, deque] = defaultdict(deque)
+
+
+def _rate_limit(request: Request) -> None:
+    now = time.time()
+    ip = request.client.host if request.client else "unknown"
+    q = _rate_hits[ip]
+    while q and now - q[0] > 60:
+        q.popleft()
+    if len(q) >= settings.review_rate_per_min:
+        raise HTTPException(
+            429, "Rate limit exceeded "
+                 f"({settings.review_rate_per_min}/min per IP). "
+                 "Try again in a minute.")
+    q.append(now)
 
 
 class PeerBody(BaseModel):
@@ -73,6 +108,11 @@ class CommentPatch(BaseModel):
 class ContentPatch(BaseModel):
     title: str | None = None
     text: str | None = None
+
+
+class RemediateBody(BaseModel):
+    finding_ids: list[int] | None = None   # None => all accepted (1)
+    apply: bool = False
 
 
 # --- peer review stage -----------------------------------------------------
@@ -214,6 +254,47 @@ def diff_versions(cid: int, frm: int, to: int,
             "added": added, "removed": removed}
 
 
+# --- remediate (auto-apply fixes + re-review) ------------------------------
+@router.post("/content/{cid}/remediate")
+def remediate(cid: int, body: RemediateBody,
+              user: dict = Depends(require_role("reviewer"))):
+    with db.get() as conn:
+        row = _content(conn, cid)
+        if row["status"] in ("approved", "published"):
+            raise HTTPException(409, "approved/published content is locked")
+        finds = db.rows(conn, "SELECT * FROM finding WHERE content_id=? AND accepted=1", (cid,))
+        if body.finding_ids is not None:
+            wants = set(body.finding_ids)
+            finds = [f for f in finds if f["id"] in wants]
+        new, applied, skipped = row["text"], [], []
+        for f in finds:
+            ex, sug = f["excerpt"], f["suggestion"]
+            # drop-in text replacements only: excerpt verbatim in current text
+            if ex and ex in new and sug and sug != ex and len(sug) < 400:
+                new = new.replace(ex, sug, 1)
+                applied.append(f["id"])
+            else:
+                skipped.append(f["id"])
+        if new == row["text"]:
+            raise HTTPException(422, "no applicable accepted suggestions")
+        diff = list(difflib.unified_diff(row["text"].splitlines(), new.splitlines(),
+                                         fromfile="current", tofile="remediated", lineterm=""))
+        if not body.apply:
+            return {"applied": applied, "skipped": skipped, "lines": diff}   # preview
+        conn.execute("UPDATE content SET text=?, status='draft' WHERE id=?", (new, cid))
+        conn.execute("DELETE FROM finding WHERE content_id=?", (cid,))
+        _snapshot(conn, cid, user["email"])          # reuse existing version capture
+        db.log_audit(conn, cid, user["email"], "remediate",
+                     f"applied={applied} skipped={skipped}")
+        conn.commit()
+    from .review_service import run_review_on       # auto re-review
+    with db.get() as conn:
+        row = db.one(conn, "SELECT * FROM content WHERE id=?", (cid,))
+        result = run_review_on(conn, row, user)
+    return {"applied": applied, "skipped": skipped,
+            "lines": diff, "review": result}
+
+
 # --- publish (integration target) -----------------------------------------
 @router.post("/content/{cid}/publish")
 def publish(cid: int, user: dict = Depends(require_role("manager"))):
@@ -231,11 +312,83 @@ def publish(cid: int, user: dict = Depends(require_role("manager"))):
         result = _dispatch_webhook("content.published", cid, {
             "channel": row["channel"], "title": row["title"],
             "published_by": user["email"]})
+        slack_result = _dispatch_slack(row, user["email"])
         db.log_audit(conn, cid, user["email"], "publish",
-                     json.dumps(result))
+                     json.dumps({"webhook": result, "slack": slack_result}))
         conn.commit()
         row = db.one(conn, "SELECT * FROM content WHERE id=?", (cid,))
-    return {"content": row, "webhook": result}
+    return {"content": row, "webhook": result, "slack": slack_result}
+
+
+# --- inbound integrations (webhook listener) ------------------------------
+@router.post("/integrations/inbound")
+async def inbound_webhook(request: Request):
+    """External tools (CI, Drive, CMS) trigger review, approval, or publish via HMAC."""
+    _rate_limit(request)
+    body_bytes = await request.body()
+    sig_header = request.headers.get("X-BrandGuard-Signature", "")
+    if not sig_header:
+        raise HTTPException(401, "missing X-BrandGuard-Signature header")
+
+    expected_sig = "sha256=" + hmac.new(
+        settings.webhook_secret.encode(), body_bytes, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig_header, expected_sig):
+        raise HTTPException(401, "invalid webhook signature")
+
+    try:
+        data = json.loads(body_bytes)
+    except Exception:
+        raise HTTPException(400, "invalid json body")
+
+    action = data.get("action")
+    cid = data.get("content_id")
+    if action not in ("review", "approve", "publish"):
+        raise HTTPException(400, f"unknown action: {action}")
+    if not isinstance(cid, int):
+        raise HTTPException(400, "content_id must be an integer")
+
+    actor = "inbound-webhook"
+    with db.get() as conn:
+        row = _content(conn, cid)
+        if action == "review":
+            from .review_service import run_review_on
+            system_user = {"email": "inbound-webhook@brandguard.system", "role": "reviewer"}
+            result = run_review_on(conn, row, system_user)
+            db.log_audit(conn, cid, actor, "inbound_review", "triggered via inbound webhook")
+            conn.commit()
+            return {"action": "review", "content_id": cid, "review": result}
+
+        elif action == "approve":
+            if row["status"] not in ("review", "peer_review"):
+                raise HTTPException(
+                    409, f"approval only from 'review'/'peer_review' (now '{row['status']}')")
+            crit = db.one(conn, "SELECT COUNT(*) n FROM finding WHERE content_id=?"
+                          " AND severity='critical' AND accepted=0", (cid,))["n"]
+            if crit:
+                raise HTTPException(
+                    409, f"{crit} unresolved critical finding(s) — accept or dismiss them before approving")
+            conn.execute("UPDATE content SET status='approved' WHERE id=?", (cid,))
+            _snapshot(conn, cid, actor)
+            db.log_audit(conn, cid, actor, "approve", "approved via inbound webhook")
+            conn.commit()
+            updated = db.one(conn, "SELECT * FROM content WHERE id=?", (cid,))
+            return {"action": "approve", "content": updated}
+
+        elif action == "publish":
+            if row["status"] != "approved":
+                raise HTTPException(
+                    409, f"only approved content publishes (now '{row['status']}')")
+            import datetime as _dt
+            now = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            conn.execute("UPDATE content SET status='published', published_at=? WHERE id=?", (now, cid))
+            _snapshot(conn, cid, actor)
+            webhook_res = _dispatch_webhook("content.published", cid, {
+                "channel": row["channel"], "title": row["title"], "published_by": actor})
+            slack_res = _dispatch_slack(row, actor)
+            db.log_audit(conn, cid, actor, "publish", json.dumps({"webhook": webhook_res, "slack": slack_res}))
+            conn.commit()
+            updated = db.one(conn, "SELECT * FROM content WHERE id=?", (cid,))
+            return {"action": "publish", "content": updated, "webhook": webhook_res, "slack": slack_res}
 
 
 # --- audit integrity -------------------------------------------------------

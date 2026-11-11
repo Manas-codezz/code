@@ -36,6 +36,19 @@ export interface Content {
   findings?: Finding[]
 }
 
+export interface RemediateResult {
+  applied: number[]
+  skipped: number[]
+  lines: string[]
+  review?: ReviewResult
+}
+
+export interface PublishResult {
+  content: Content
+  webhook: { sent: boolean; status?: number; error?: string; reason?: string }
+  slack: { sent: boolean; status?: number; error?: string; reason?: string }
+}
+
 export interface ReviewResult {
   findings: Finding[]
   llm_used: boolean
