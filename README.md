@@ -246,6 +246,7 @@ real env vars always win). Nothing sensitive is hardcoded.
 | `SLA_HOURS`             | `24`                                       | review due window after submit                 |
 | `WEBHOOK_URL`           | — (disabled)                               | publish webhook target                         |
 | `WEBHOOK_SECRET`        | —                                          | HMAC-SHA256 signing secret                     |
+| `INBOUND_ALLOW_AUTOPUBLISH` | `true`                                 | set `0` to block inbound approve/publish (review stays allowed) |
 
 ---
 
