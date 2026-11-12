@@ -13,6 +13,16 @@ from .. import db
 from ..models import Finding
 from .retrieval import relevant_kb_chunks, tokenize
 
+# guideline_gaps() re-embeds on every analytics load (an external Gemini call
+# when a key is set). Cache by a cheap signature of its inputs; ingest clears
+# it explicitly so updated guidelines are never served stale.
+_GAP_CACHE: dict[tuple, list[dict]] = {}
+_GAP_CACHE_MAX = 8
+
+
+def clear_gap_cache() -> None:
+    _GAP_CACHE.clear()
+
 log = logging.getLogger("brandguard.citation")
 
 # A passage counts as coverage for a category when it mentions any of
@@ -88,6 +98,11 @@ def guideline_gaps() -> list[dict]:
         return [{"category": r["category"], "count": r["cnt"],
                  "missing_passages": True}
                 for r in sorted(counts, key=lambda x: -x["cnt"])]
+    key = (tuple(sorted((r["category"], r["cnt"]) for r in counts)),
+           tuple(sorted(r["rule"] for r in rules)), n_chunks)
+    cached = _GAP_CACHE.get(key)
+    if cached is not None:
+        return cached
     query = " ".join([r["category"] for r in counts]
                      + [r["rule"] for r in rules])
     # At this KB's scale consider (almost) the whole store — a gap means
@@ -103,4 +118,7 @@ def guideline_gaps() -> list[dict]:
             "count": r["cnt"],
             "missing_passages": not any(k in corpus for k in keywords),
         })
+    _GAP_CACHE[key] = gaps
+    if len(_GAP_CACHE) > _GAP_CACHE_MAX:
+        _GAP_CACHE.pop(next(iter(_GAP_CACHE)))
     return gaps

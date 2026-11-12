@@ -12,6 +12,7 @@ from typing import Literal
 from fastapi import (FastAPI, HTTPException, UploadFile, File, Form, Request,
                      Body, Depends)
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -54,6 +55,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Compress JSON responses (analytics/content lists shrink 70-90%).
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
 @app.middleware("http")
@@ -356,66 +359,69 @@ def audit_log(limit: int = 100,
 @app.get("/analytics/summary", response_model=AnalyticsSummary)
 def analytics(user: dict = Depends(require_role("manager"))):
     with db.get() as conn:
-        total = db.one(conn, "SELECT COUNT(*) n FROM content")["n"]
-        approved = db.one(conn, "SELECT COUNT(*) n FROM content"
-                          " WHERE status='approved'")["n"]
-        pending = db.one(conn, "SELECT COUNT(*) n FROM content"
-                         " WHERE status IN ('draft','review')")["n"]
-        n_find = db.one(conn, "SELECT COUNT(*) n FROM finding "
-                              "WHERE superseded=0")["n"]
+        # one round-trip for the content counters
+        c = db.one(conn, "SELECT COUNT(*) total,"
+                         " SUM(CASE WHEN status='approved' THEN 1 ELSE 0 END) approved,"
+                         " SUM(CASE WHEN status IN ('draft','review') THEN 1 ELSE 0 END) pending"
+                         " FROM content")
+        total = c["total"] or 0
+        approved = c["approved"] or 0
+        pending = c["pending"] or 0
 
-        by_cat = db.rows(conn, """
-            SELECT category, COUNT(*) count,
-                   SUM(CASE WHEN severity='critical' THEN 1 ELSE 0 END)   critical,
-                   SUM(CASE WHEN severity='warning' THEN 1 ELSE 0 END)    warning,
-                   SUM(CASE WHEN severity='suggestion' THEN 1 ELSE 0 END) suggestion
-            FROM finding WHERE superseded=0
-            GROUP BY category ORDER BY count DESC""")
+        # one round-trip for the finding matrix — derives n_find, by_cat,
+        # by_sev and the heat map without four separate GROUP BY queries.
+        cat_sev: dict[str, dict[str, int]] = {}
+        sev_n = {s: 0 for s in ("critical", "warning", "suggestion")}
+        heat = {}
+        for r in db.rows(conn, "SELECT category, severity, COUNT(*) n "
+                               "FROM finding WHERE superseded=0 "
+                               "GROUP BY category, severity"):
+            cat_sev.setdefault(r["category"], {})[r["severity"]] = r["n"]
+            sev_n[r["severity"]] = sev_n.get(r["severity"], 0) + r["n"]
+            heat[(r["category"], r["severity"])] = r["n"]
+        n_find = sum(sev_n.values())
+        by_sev = sev_n
+        by_cat = [
+            {"category": cat, "count": sum(v.values()),
+             "critical": v.get("critical", 0),
+             "warning": v.get("warning", 0),
+             "suggestion": v.get("suggestion", 0)}
+            for cat, v in sorted(cat_sev.items(),
+                                 key=lambda kv: sum(kv[1].values()),
+                                 reverse=True)]
+
         rules = db.rows(conn, """
             SELECT rule, COUNT(*) count FROM finding
             WHERE superseded=0
             GROUP BY rule ORDER BY count DESC LIMIT 10""")
-        sev_rows = db.rows(conn, "SELECT severity, COUNT(*) n "
-                                 "FROM finding WHERE superseded=0 "
-                                 "GROUP BY severity")
         cost = db.one(conn, "SELECT COUNT(*) calls, "
                             "COALESCE(SUM(tokens),0) tok FROM audit "
                             "WHERE action='review'") or {}
-        by_sev = {s: 0 for s in ("critical", "warning", "suggestion")}
-        by_sev.update({r["severity"]: r["n"] for r in sev_rows})
 
-        # --- per-team compliance (users' teams own content they create) ---
-        team_rows = db.rows(conn, """
-            SELECT c.team,
-                   COUNT(*) total,
-                   SUM(CASE WHEN c.status='approved' THEN 1 ELSE 0 END) approved,
-                   SUM(CASE WHEN c.status IN ('draft','review','peer_review')
-                            THEN 1 ELSE 0 END) pending
-            FROM content c GROUP BY c.team""")
-        team_find = {
-            r["team"]: r for r in db.rows(conn, """
-                SELECT c.team, COUNT(f.id) findings,
+        # --- per-team compliance: one join instead of two round-trips ---
+        by_team = []
+        for r in db.rows(conn, """
+                SELECT c.team,
+                       COUNT(DISTINCT c.id) total,
+                       COUNT(DISTINCT CASE WHEN c.status='approved'
+                                           THEN c.id END) approved,
+                       COUNT(DISTINCT CASE WHEN c.status IN
+                             ('draft','review','peer_review')
+                                           THEN c.id END) pending,
+                       COUNT(f.id) findings,
                        COALESCE(SUM(CASE WHEN f.severity='critical'
                                          THEN 1 ELSE 0 END),0) criticals
                 FROM content c LEFT JOIN finding f
                      ON f.content_id=c.id AND f.superseded=0
-                GROUP BY c.team""")}
-        by_team = []
-        for r in team_rows:
-            f = team_find.get(r["team"], {})
+                GROUP BY c.team"""):
             t = r["total"] or 1
             by_team.append(TeamScore(
                 team=r["team"], total=r["total"], approved=r["approved"],
-                pending=r["pending"], findings=f.get("findings") or 0,
-                criticals=f.get("criticals") or 0,
+                pending=r["pending"], findings=r["findings"] or 0,
+                criticals=r["criticals"] or 0,
                 compliance_rate=round((r["approved"] or 0) / t * 100, 1)))
 
         # --- category x severity heat map (guideline-gap view) ---
-        heat = {(r["category"], r["severity"]): r["n"]
-                for r in db.rows(conn, "SELECT category, severity, "
-                                       "COUNT(*) n FROM finding "
-                                       "WHERE superseded=0 "
-                                       "GROUP BY category, severity")}
         heat_map = [
             {"category": c, "severity": s, "count": heat.get((c, s), 0)}
             for c in ("tone", "term", "claim", "a11y", "visual")
@@ -484,13 +490,13 @@ def analytics_trend(days: int = 30,
     start = today - timedelta(days=days - 1)
     start_s = start.isoformat()
     with db.get() as conn:
-        created = {r["d"]: r["n"] for r in db.rows(conn,
-            "SELECT substr(created_at,1,10) d, COUNT(*) n FROM content "
-            "WHERE substr(created_at,1,10) >= ? GROUP BY d", (start_s,))}
-        approved = {r["d"]: r["n"] for r in db.rows(conn,
-            "SELECT substr(created_at,1,10) d, COUNT(*) n FROM content "
-            "WHERE substr(created_at,1,10) >= ? "
-            "AND status IN ('approved','published') GROUP BY d", (start_s,))}
+        rows = db.rows(conn,
+            "SELECT substr(created_at,1,10) d, COUNT(*) n,"
+            " SUM(CASE WHEN status IN ('approved','published')"
+            " THEN 1 ELSE 0 END) appr FROM content "
+            "WHERE substr(created_at,1,10) >= ? GROUP BY d", (start_s,))
+        created = {r["d"]: r["n"] for r in rows}
+        approved = {r["d"]: r["appr"] for r in rows}
         found = {r["d"]: r["n"] for r in db.rows(conn,
             "SELECT substr(created_at,1,10) d, COUNT(*) n FROM finding "
             "WHERE superseded=0 AND substr(created_at,1,10) >= ? "
@@ -510,13 +516,15 @@ def analytics_trend(days: int = 30,
 
 # ---------- uploads (image content) ----------
 @app.post("/content/{cid}/upload", response_model=ContentOut)
-async def upload_image(cid: int, file: UploadFile = File(...),
-                       alt: str = Form(""),
-                       user: dict = Depends(current_user)):
+def upload_image(cid: int, file: UploadFile = File(...),
+                 alt: str = Form(""),
+                 user: dict = Depends(current_user)):
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(400, "file must be an image")
 
-    data = await file.read()
+    # sync def → FastAPI runs this in a threadpool, so PIL/disk/DB work here
+    # never blocks the event loop.
+    data = file.file.read()
     if len(data) > settings.max_upload_bytes:
         raise HTTPException(
             413, f"image exceeds "

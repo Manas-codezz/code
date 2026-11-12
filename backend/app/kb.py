@@ -86,15 +86,8 @@ def bulk_import(body: dict, user: dict = Depends(require_role("manager"))):
     return {"added": added, "skipped": skipped}
 
 
-async def _read_file_text(upload: UploadFile) -> str:
-    """Extract text from an uploaded guideline document.
-
-    Extension-dispatched: a corrupt PDF/DOCX returns "" (honest
-    'no text found') instead of decoding binary garbage into chunks."""
-    data = await upload.read()
-    if not data:
-        return ""
-    name = (upload.filename or "").lower()
+def _extract_text(data: bytes, name: str) -> str:
+    """Sync extraction (pypdf/docx are CPU-bound) — run off the event loop."""
     if name.endswith(".pdf"):
         try:
             import pypdf
@@ -112,6 +105,19 @@ async def _read_file_text(upload: UploadFile) -> str:
             return ""
     # .txt / .md / unknown-but-text: best-effort decode
     return data.decode("utf-8", errors="ignore")
+
+
+async def _read_file_text(upload: UploadFile) -> str:
+    """Extract text from an uploaded guideline document.
+
+    Extension-dispatched: a corrupt PDF/DOCX returns "" (honest
+    'no text found') instead of decoding binary garbage into chunks."""
+    data = await upload.read()
+    if not data:
+        return ""
+    from starlette.concurrency import run_in_threadpool
+    return await run_in_threadpool(
+        _extract_text, data, (upload.filename or "").lower())
 
 
 CHUNK_SIZE = 1000
@@ -174,6 +180,8 @@ async def kb_ingest(
         db.log_audit(conn, None, user["email"], "kb_ingest",
                      f"source={source} chunks={added}")
         conn.commit()
+    from .engine.citation import clear_gap_cache
+    clear_gap_cache()
     return {"chunks": added, "status": "ok", "source": source}
 
 
