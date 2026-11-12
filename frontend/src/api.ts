@@ -219,13 +219,23 @@ export async function upload<T = unknown>(
   return r.json() as Promise<T>
 }
 
-export async function ingestGuidelines(file: File): Promise<{chunks: number; status: string}> {
+export type IngestResult = { chunks: number; status: string; source?: string }
+
+/** Ingest a guideline document (PDF/DOCX/TXT) — same auth + refresh as upload(). */
+export async function ingestGuidelines(
+  file: File, retry = true,
+): Promise<IngestResult> {
+  const s = loadAuth()
   const fd = new FormData()
   fd.append('file', file)
   const r = await fetch('/kb/ingest', {
     method: 'POST',
+    headers: s ? { Authorization: `Bearer ${s.access_token}` } : undefined,
     body: fd,
   })
+  if (r.status === 401 && s && retry && await tryRefresh()) {
+    return ingestGuidelines(file, false)
+  }
   if (!r.ok) {
     let m = `${r.status}`
     try {
@@ -236,7 +246,7 @@ export async function ingestGuidelines(file: File): Promise<{chunks: number; sta
     } catch { /* keep status */ }
     throw new ApiError(r.status, m)
   }
-  return r.json() as Promise<{chunks: number; status: string}>
+  return r.json() as Promise<IngestResult>
 }
 
 export async function login(email: string, password: string): Promise<User> {

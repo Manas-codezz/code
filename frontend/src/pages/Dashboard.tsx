@@ -396,10 +396,12 @@ function ManagerDashboard() {
                 <div className="space-y-3">
                   {d.guideline_gaps.map((g) => (
                     <div key={g.category}
-                         className="grid grid-cols-[ auto_1fr_30px ] items-center gap-2 text-xs p-2 rounded-md hover:bg-surface-2 transition-colors">
+                         className="grid grid-cols-[auto_1fr_auto] items-center gap-2 text-xs p-2 rounded-md hover:bg-surface-2 transition-colors">
                       <span className="text-muted capitalize">{g.category}</span>
-                      <span className={`text-${g.missing ? 'danger' : 'sague'} font-medium text-[10px] shrink-0`}
-                        title={g.missing ? 'No KB passage found' : 'Covered'}>{g.missing ? '✗' : '✓'}</span>
+                      <span className={`${g.missing ? 'text-danger' : 'text-sage'} font-medium text-[10px] shrink-0 uppercase tracking-wider`}
+                        title={g.missing ? 'No KB passage found' : 'Covered by KB'}>
+                        {g.missing ? 'gap' : 'covered'}
+                      </span>
                       <span className="tabular-nums text-right text-ink font-semibold">{g.count}</span>
                     </div>
                   ))}

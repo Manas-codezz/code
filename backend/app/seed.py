@@ -180,40 +180,71 @@ def ensure_users() -> None:
         conn.commit()
 
 
+def ensure_kb_chunks() -> int:
+    """Backfill kb_chunk from the seeded brand book so semantic retrieval
+    and source citations work on a fresh database (Living KB v2).
+    Idempotent: no-op once any chunks exist (ingested documents count)."""
+    import json as _json
+    with db.get() as conn:
+        if db.one(conn, "SELECT COUNT(*) n FROM kb_chunk")["n"]:
+            return 0
+        guides = db.rows(conn, "SELECT title, body FROM guideline "
+                               "ORDER BY id")
+        if not guides:
+            return 0
+        from .engine.embed import embed_texts
+        texts = [f"{g['title']}: {g['body']}" for g in guides]
+        vecs = embed_texts(texts)
+        for i, (text, vec) in enumerate(zip(texts, vecs)):
+            cur = conn.execute(
+                "INSERT INTO kb_chunk (source, chunk_index, text, embedding)"
+                " VALUES (?,?,?,?) RETURNING id",
+                ("brand-guidelines.md", i, text, _json.dumps(vec)))
+            db.sync_vector(conn, cur.fetchone()["id"], vec)
+        conn.commit()
+        return len(texts)
+
+
 def seed(reset: bool = False) -> dict:
     with db.get() as conn:
         if reset:
             for t in ("audit", "finding", "content", "guideline",
-                      "glossary", "fact", "brand_color"):
+                      "glossary", "fact", "brand_color", "kb_chunk"):
                 conn.execute(f"DELETE FROM {t}")
-        if conn.execute("SELECT COUNT(*) c FROM guideline").fetchone()["c"]:
+        skipped = bool(conn.execute(
+            "SELECT COUNT(*) c FROM guideline").fetchone()["c"])
+        if skipped:
             _backfill(conn)
-            return {"skipped": True}
+        else:
+            conn.executemany("INSERT INTO guideline (title, body) VALUES (?, ?)",
+                             GUIDELINES)
+            conn.executemany(
+                "INSERT INTO glossary (term, kind, note) VALUES (?, ?, ?)",
+                GLOSSARY)
+            conn.executemany(
+                "INSERT INTO fact (claim, source, verified_at) VALUES (?,?,?)",
+                FACTS)
+            conn.executemany("INSERT INTO brand_color (hex, name) VALUES (?, ?)",
+                             COLORS)
 
-        conn.executemany("INSERT INTO guideline (title, body) VALUES (?, ?)",
-                         GUIDELINES)
-        conn.executemany(
-            "INSERT INTO glossary (term, kind, note) VALUES (?, ?, ?)",
-            GLOSSARY)
-        conn.executemany(
-            "INSERT INTO fact (claim, source, verified_at) VALUES (?,?,?)",
-            FACTS)
-        conn.executemany("INSERT INTO brand_color (hex, name) VALUES (?, ?)",
-                         COLORS)
+            if reset or conn.execute("SELECT COUNT(*) c FROM content"
+                                     ).fetchone()["c"] == 0:
+                for title, typ, text, channel in SAMPLE_CONTENT:
+                    conn.execute(
+                        "INSERT INTO content (type, title, text, channel, status,"
+                        " created_by) VALUES (?,?,?,?, 'draft', 'creator')",
+                        (typ, title, text, channel))
+            conn.commit()
 
-        if reset or conn.execute("SELECT COUNT(*) c FROM content"
-                                 ).fetchone()["c"] == 0:
-            for title, typ, text, channel in SAMPLE_CONTENT:
-                conn.execute(
-                    "INSERT INTO content (type, title, text, channel, status,"
-                    " created_by) VALUES (?,?,?,?, 'draft', 'creator')",
-                    (typ, title, text, channel))
-        conn.commit()
+    # Living KB v2: make the seeded brand book retrievable + citable
+    kb_chunks = ensure_kb_chunks()
 
+    if skipped:
+        return {"skipped": True, "kb_chunks": kb_chunks}
     return {"skipped": False,
             "guidelines": len(GUIDELINES), "glossary": len(GLOSSARY),
             "facts": len(FACTS), "colors": len(COLORS),
-            "samples": len(SAMPLE_CONTENT)}
+            "samples": len(SAMPLE_CONTENT), "kb_chunks": kb_chunks}
 
 
 if __name__ == "__main__":

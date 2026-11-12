@@ -1,14 +1,21 @@
-"""RAG-lite: BM25 retrieval over brand-guideline chunks (stdlib only — no
-vector DB needed at this scale; swap for pgvector when the KB outgrows
-prompt budget). Also supports pgvector cosine retrieval for kb_chunk.
+"""RAG-lite retrieval over brand-guideline chunks.
+
+Two interchangeable ranks over the same kb_chunk store:
+  * BM25 (stdlib) for the pinned `guideline` table bodies
+  * semantic cosine for ingested documents (Living KB v2) — exact
+    `embedding_vec <=>` distance on Postgres+pgvector, cosine-in-Python
+    over the portable JSON column everywhere else.
 
 Glossary + facts stay pinned in every prompt (exact-match data retrieval
 can't miss); only the long guideline bodies are ranked/retrieved."""
 import re
 import json
+import logging
+
 from .. import db
 from .embed import embed_texts
-from ..db import is_postgres as _is_postgres
+
+log = logging.getLogger("brandguard.retrieval")
 
 _TOKEN = re.compile(r"[a-z0-9']+")
 K1, B = 1.5, 0.75
@@ -50,38 +57,62 @@ def _cosine_sim(a: list[float], b: list[float]) -> float:
     """Cosine similarity between two unit vectors."""
     if not a or not b:
         return 0.0
-    import math
     num = sum(x * y for x, y in zip(a, b))
     den = (sum(x * x for x in a) * sum(y * y for y in b)) ** 0.5
     return num / den if den else 0.0
 
 
 def pgvector_cosine(conn, query_vec: list[float], top_k: int = 3) -> list[dict]:
-    """Postgres-only: use JSON embedding column with Python cosine (pgvector column pending)."""
-    # embedding_vec column not yet populated; fall through to python_cosine path
-    return python_cosine(conn, query_vec, top_k)
+    """Postgres + pgvector: exact cosine distance computed in the database.
+
+    The JSON embedding stays the portable truth; embedding_vec is the
+    derived index. Raises so callers can fall back on any error.
+    """
+    return db.rows(
+        conn,
+        "SELECT id, source, chunk_index, text, embedding FROM kb_chunk "
+        "ORDER BY embedding_vec <=> %s::vector LIMIT %s",
+        (json.dumps(query_vec), top_k))
 
 
 def python_cosine(conn, query_vec: list[float], top_k: int = 3) -> list[dict]:
-    """SQLite/JSON fallback: compute cosine similarity in Python over the JSON embedding."""
-    rows_ = db.rows(conn, "SELECT id, source, chunk_index, text, embedding FROM kb_chunk")
+    """SQLite/JSON fallback: cosine similarity computed in Python."""
+    rows_ = db.rows(
+        conn, "SELECT id, source, chunk_index, text, embedding FROM kb_chunk")
     scored = []
     for r in rows_:
-        stored = json.loads(r["embedding"])
-        sim = _cosine_sim(query_vec, stored)
-        scored.append((sim, r))
+        try:
+            stored = json.loads(r["embedding"])
+        except (TypeError, ValueError):
+            continue
+        scored.append((_cosine_sim(query_vec, stored), r))
     scored.sort(key=lambda x: -x[0])
     return [r for _, r in scored[:top_k]]
 
 
-def relevant_kb_chunks(content: str, top_k: int = 3, vec: list[float] | None = None) -> list[dict]:
-    """Guideline KB chunks most relevant to this content (semantic retrieval).
-    If vec is pre-computed, no embedding API call is made.
-    Uses Python cosine over JSON embedding; pgvector path pending vector-column pop."""
+def search_chunks(conn, query_vec: list[float], top_k: int = 3) -> list[dict]:
+    """Best available ranker: pgvector when live, Python cosine otherwise."""
+    if db.is_postgres() and db.vector_enabled:
+        try:
+            return pgvector_cosine(conn, query_vec, top_k)
+        except Exception as e:
+            log.warning("pgvector query failed, cosine-in-Python: %s", e)
+    return python_cosine(conn, query_vec, top_k)
+
+
+def relevant_kb_chunks(content: str, top_k: int = 3,
+                       vec: list[float] | None = None) -> list[dict]:
+    """kb_chunk passages most relevant to this content (semantic retrieval).
+
+    Pass `vec` to reuse a pre-computed embedding and skip the API call.
+    Empty content retrieves nothing — never cite a passage for copy that
+    does not exist."""
+    if not content or not content.strip():
+        return []
     with db.get() as conn:
         if vec is None:
             vec = embed_texts([content])[0]
-        return python_cosine(conn, vec, top_k)
+        return search_chunks(conn, vec, top_k)
 
 
 def relevant_guidelines(content: str, top_k: int = 3) -> list[dict]:

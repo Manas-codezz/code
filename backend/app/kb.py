@@ -11,7 +11,6 @@ Also: ingest guideline PDFs/DOCX, auto-chunk+embed into kb_chunk, and
 import io
 import json
 import re
-import zlib
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
@@ -88,71 +87,106 @@ def bulk_import(body: dict, user: dict = Depends(require_role("manager"))):
 
 
 async def _read_file_text(upload: UploadFile) -> str:
-    """Read uploaded file as text, supporting PDF and DOCX."""
+    """Extract text from an uploaded guideline document.
+
+    Extension-dispatched: a corrupt PDF/DOCX returns "" (honest
+    'no text found') instead of decoding binary garbage into chunks."""
     data = await upload.read()
     if not data:
         return ""
-    # PDF via pypdf
-    try:
-        import pypdf
-        reader = pypdf.PdfReader(io.BytesIO(data))
-        return " ".join(page.extract_text() or "" for page in reader.pages)
-    except Exception:
-        pass
-    # DOCX via python-docx
-    try:
-        import docx
-        doc = docx.Document(io.BytesIO(data))
-        return " ".join(paragraph.text or "" for paragraph in doc.paragraphs)
-    except Exception:
-        pass
-    # Fallback: treat as plain text
+    name = (upload.filename or "").lower()
+    if name.endswith(".pdf"):
+        try:
+            import pypdf
+            reader = pypdf.PdfReader(io.BytesIO(data))
+            return " ".join(page.extract_text() or ""
+                            for page in reader.pages)
+        except Exception:
+            return ""
+    if name.endswith(".docx"):
+        try:
+            import docx
+            doc = docx.Document(io.BytesIO(data))
+            return "\n".join(p.text for p in doc.paragraphs if p.text)
+        except Exception:
+            return ""
+    # .txt / .md / unknown-but-text: best-effort decode
     return data.decode("utf-8", errors="ignore")
+
+
+CHUNK_SIZE = 1000
+CHUNK_OVERLAP = 150
+
+
+def chunk_text(text: str, size: int = CHUNK_SIZE,
+               overlap: int = CHUNK_OVERLAP) -> list[str]:
+    """~1000-char windows with 150-char overlap, cut on word boundaries."""
+    flat = " ".join(text.split())
+    if not flat:
+        return []
+    chunks, start = [], 0
+    while start < len(flat):
+        end = min(start + size, len(flat))
+        if end < len(flat):
+            cut = flat.rfind(" ", start, end)
+            if cut > start + size // 2:
+                end = cut
+        piece = flat[start:end].strip()
+        if piece:
+            chunks.append(piece)
+        if end >= len(flat):
+            break
+        start = max(end - overlap, start + 1)
+    return chunks
 
 
 @router.post("/ingest", name="kb_ingest")
 async def kb_ingest(
-    upload: UploadFile = File(...),
+    file: UploadFile = File(...),
     user: dict = Depends(require_role("manager")),
 ):
-    """Ingest a brand guideline PDF or DOCX.
+    """Ingest a brand guideline PDF/DOCX/TXT (Living KB v2).
 
-    - Extracts text
-    - Chunks into ~1000 character segments with 150 overlap
-    - Embeds each chunk (Gemini API or local zlib.crc32 fallback)
-    - Inserts kb_chunk rows (JSON embedding + optional pgvector HNSW index)
-    Returns {"chunks": N, "status": "ok"} on success.
+    Extract → chunk (~1000 chars, 150 overlap) → embed (Gemini or local
+    256-d fallback) → store. The JSON embedding is the portable truth;
+    the derived pgvector column is synced when available. Re-ingesting a
+    file replaces its previous chunks. Returns {"chunks", "status", "source"}.
     """
-    text = await _read_file_text(upload)
+    source = Path(file.filename or "document").name
+    text = await _read_file_text(file)
     if not text.strip():
-        return {"chunks": 0, "status": "no text found"}
-    # Chunk: ~1000 chars, 150 overlap
-    chunk_size = 1000
-    chunk_overlap = 150
-    chunks_texts = []
-    for i in range(0, len(text), chunk_size - chunk_overlap):
-        chunk = text[i : i + chunk_size]
-        if chunk.strip():
-            chunks_texts.append(chunk)
-    if not chunks_texts:
-        return {"chunks": 0, "status": "no usable chunks"}
-    # Embed chunks (Gemini if key available, else deterministic local)
+        return {"chunks": 0, "status": "no text found", "source": source}
+    chunks = chunk_text(text)
+    if not chunks:
+        return {"chunks": 0, "status": "no usable chunks", "source": source}
     from .engine.embed import embed_texts
-    embeddings = embed_texts(chunks_texts)  # list[list[float]]
-    # Insert kb_chunk rows
+    embeddings = embed_texts(chunks)          # list[list[float]]
     added = 0
     with db.get() as conn:
-        for i, (chunk, vec) in enumerate(zip(chunks_texts, embeddings)):
-            vec_json = json.dumps(vec)
-            # portable JSON column always works; pgvector column added later if available
-            conn.execute(
-                """INSERT INTO kb_chunk (source, chunk_index, text, embedding)
-                   VALUES (%s, %s, %s, %s)""",
-                ("ingest", i, chunk, vec_json),
-            )
+        conn.execute("DELETE FROM kb_chunk WHERE source=?", (source,))
+        for i, (chunk, vec) in enumerate(zip(chunks, embeddings)):
+            cur = conn.execute(
+                "INSERT INTO kb_chunk (source, chunk_index, text, embedding)"
+                " VALUES (?,?,?,?) RETURNING id",
+                (source, i, chunk, json.dumps(vec)))
+            db.sync_vector(conn, cur.fetchone()["id"], vec)
             added += 1
+        db.log_audit(conn, None, user["email"], "kb_ingest",
+                     f"source={source} chunks={added}")
         conn.commit()
-    return {"chunks": added, "status": "ok"}
+    return {"chunks": added, "status": "ok", "source": source}
+
+
+@router.get("/documents")
+def kb_documents(_: dict = Depends(current_user)):
+    """Ingested guideline documents with chunk counts (Living KB v2)."""
+    with db.get() as conn:
+        docs = db.rows(
+            conn, "SELECT source, COUNT(*) chunks, MAX(created_at)"
+                  " ingested_at FROM kb_chunk GROUP BY source"
+                  " ORDER BY source")
+        total = sum(d["chunks"] for d in docs)
+    return {"documents": docs, "chunks": total}
 
 
 # --- per-table CRUD (generated from SPEC, one code path) -------------------

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import re
+import zlib
 
 from app.settings import settings
 

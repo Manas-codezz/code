@@ -443,16 +443,12 @@ def analytics(user: dict = Depends(require_role("manager"))):
                 stale.append({**r, "days_old": days_old})
         stale.sort(key=lambda s: s["days_old"], reverse=True)
 
-    # guideline-gap analytics: categories with findings but no KB citation
-    all_gaps: dict[str, int] = {}
-    for r in db.rows(conn, "SELECT id, text FROM content WHERE text != ''"):
-        gaps = guideline_gaps(r["id"])
-        for g in gaps:
-            all_gaps[g["category"]] = all_gaps.get(g["category"], 0) + (1 if g["missing_passages"] else 0)
-
+    # guideline-gap analytics (Living KB v2): recurring finding categories
+    # with no covering passage in the ingested guideline documents
     gap_summary = [
-        {"category": cat, "count": cnt, "missing": all_gaps[cat] > 0}
-        for cat, cnt in sorted(all_gaps.items())
+        {"category": g["category"], "count": g["count"],
+         "missing": g["missing_passages"]}
+        for g in guideline_gaps()
     ]
 
     # compliance = approved content with zero unresolved criticals
