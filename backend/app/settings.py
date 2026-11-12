@@ -58,6 +58,10 @@ class Settings(BaseSettings):
     webhook_url: str = ""               # publish webhook target ("" = skip)
     webhook_secret: str = ""            # HMAC-SHA256 signing secret
     slack_webhook_url: str = ""         # Slack incoming webhook URL ("" = skip)
+    # inbound webhook can trigger approve/publish without a human in the loop
+    # (CI/CD). Set INBOUND_ALLOW_AUTOPUBLISH=0 to require an operator for those
+    # actions; the read-only "review" action stays allowed.
+    inbound_allow_autopublish: bool = True
 
     @property
     def origins(self) -> list[str]:

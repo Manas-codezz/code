@@ -24,6 +24,7 @@ from .models import (ContentCreate, ContentOut, ContentWithFindings, Finding,
                       CategoryCount, TeamScore, TrendPoint, TrendResponse)
 from . import seed, auth, review_service
 from .auth import current_user, require_role
+from .state import LOCKED, require_transition
 from .kb import router as kb_router
 from .workflow import router as workflow_router
 
@@ -264,8 +265,8 @@ def get_content(cid: int, user: dict = Depends(current_user)):
         if not row:
             raise HTTPException(404, "content not found")
         row["findings"] = db.rows(
-            conn, "SELECT * FROM finding WHERE content_id=? ORDER BY id",
-            (cid,))
+            conn, "SELECT * FROM finding WHERE content_id=? AND superseded=0"
+                  " ORDER BY id", (cid,))
     return row
 
 
@@ -278,6 +279,9 @@ def run_review(cid: int, request: Request, force_mock: bool = False,
         row = db.one(conn, "SELECT * FROM content WHERE id=?", (cid,))
         if not row:
             raise HTTPException(404, "content not found")
+        if row["status"] in LOCKED:
+            raise HTTPException(
+                409, f"cannot review locked content (status '{row['status']}')")
         return review_service.run_review_on(conn, row, user, force_mock)
 
 
@@ -304,12 +308,10 @@ def approve(cid: int, user: dict = Depends(require_role("manager"))):
         row = db.one(conn, "SELECT * FROM content WHERE id=?", (cid,))
         if not row:
             raise HTTPException(404, "content not found")
-        if row["status"] not in ("review", "peer_review"):
-            raise HTTPException(
-                409, f"approval only from 'review'/'peer_review' "
-                     f"(now '{row['status']}')")
+        require_transition(row["status"], "approved", user["role"])
         crit = db.one(conn, "SELECT COUNT(*) n FROM finding WHERE content_id=?"
-                      " AND severity='critical' AND accepted=0",
+                      " AND severity='critical' AND accepted=0"
+                      " AND superseded=0",
                       (cid,))["n"]
         if crit:
             raise HTTPException(
@@ -329,8 +331,10 @@ def request_changes(cid: int,
                     user: dict = Depends(require_role("manager"))):
     actor = user["email"]
     with db.get() as conn:
-        if not db.one(conn, "SELECT id FROM content WHERE id=?", (cid,)):
+        row = db.one(conn, "SELECT * FROM content WHERE id=?", (cid,))
+        if not row:
             raise HTTPException(404, "content not found")
+        require_transition(row["status"], "changes", user["role"])
         conn.execute("UPDATE content SET status='changes' WHERE id=?",
                      (cid,))
         from .workflow import _snapshot
@@ -357,19 +361,23 @@ def analytics(user: dict = Depends(require_role("manager"))):
                           " WHERE status='approved'")["n"]
         pending = db.one(conn, "SELECT COUNT(*) n FROM content"
                          " WHERE status IN ('draft','review')")["n"]
-        n_find = db.one(conn, "SELECT COUNT(*) n FROM finding")["n"]
+        n_find = db.one(conn, "SELECT COUNT(*) n FROM finding "
+                              "WHERE superseded=0")["n"]
 
         by_cat = db.rows(conn, """
             SELECT category, COUNT(*) count,
                    SUM(CASE WHEN severity='critical' THEN 1 ELSE 0 END)   critical,
                    SUM(CASE WHEN severity='warning' THEN 1 ELSE 0 END)    warning,
                    SUM(CASE WHEN severity='suggestion' THEN 1 ELSE 0 END) suggestion
-            FROM finding GROUP BY category ORDER BY count DESC""")
+            FROM finding WHERE superseded=0
+            GROUP BY category ORDER BY count DESC""")
         rules = db.rows(conn, """
             SELECT rule, COUNT(*) count FROM finding
+            WHERE superseded=0
             GROUP BY rule ORDER BY count DESC LIMIT 10""")
         sev_rows = db.rows(conn, "SELECT severity, COUNT(*) n "
-                                 "FROM finding GROUP BY severity")
+                                 "FROM finding WHERE superseded=0 "
+                                 "GROUP BY severity")
         cost = db.one(conn, "SELECT COUNT(*) calls, "
                             "COALESCE(SUM(tokens),0) tok FROM audit "
                             "WHERE action='review'") or {}
@@ -389,7 +397,8 @@ def analytics(user: dict = Depends(require_role("manager"))):
                 SELECT c.team, COUNT(f.id) findings,
                        COALESCE(SUM(CASE WHEN f.severity='critical'
                                          THEN 1 ELSE 0 END),0) criticals
-                FROM content c LEFT JOIN finding f ON f.content_id=c.id
+                FROM content c LEFT JOIN finding f
+                     ON f.content_id=c.id AND f.superseded=0
                 GROUP BY c.team""")}
         by_team = []
         for r in team_rows:
@@ -405,6 +414,7 @@ def analytics(user: dict = Depends(require_role("manager"))):
         heat = {(r["category"], r["severity"]): r["n"]
                 for r in db.rows(conn, "SELECT category, severity, "
                                        "COUNT(*) n FROM finding "
+                                       "WHERE superseded=0 "
                                        "GROUP BY category, severity")}
         heat_map = [
             {"category": c, "severity": s, "count": heat.get((c, s), 0)}
@@ -483,7 +493,8 @@ def analytics_trend(days: int = 30,
             "AND status IN ('approved','published') GROUP BY d", (start_s,))}
         found = {r["d"]: r["n"] for r in db.rows(conn,
             "SELECT substr(created_at,1,10) d, COUNT(*) n FROM finding "
-            "WHERE substr(created_at,1,10) >= ? GROUP BY d", (start_s,))}
+            "WHERE superseded=0 AND substr(created_at,1,10) >= ? "
+            "GROUP BY d", (start_s,))}
     points = []
     for i in range(days):
         d = (start + timedelta(days=i)).isoformat()

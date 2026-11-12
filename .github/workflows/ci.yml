@@ -16,9 +16,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install
-        run: pip install -e ".[dev]" || pip install -e .
+        run: pip install -r requirements.txt
       - name: Audit dependencies
-        run: pip-audit || true            # informational in CI, not a gate
+        run: pip install pip-audit && pip-audit || true   # informational, not a gate
       - name: Tests (mock provider — no API spend)
         env:
           LLM_PROVIDER: mock

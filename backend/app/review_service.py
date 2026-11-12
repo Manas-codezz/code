@@ -45,7 +45,11 @@ def run_review_on(conn, row: dict, user: dict,
     # (semantic retrieval over kb_chunk — no-op when the KB has no chunks)
     findings = attach_citations(findings, row["text"])
 
-    conn.execute("DELETE FROM finding WHERE content_id=?", (cid,))
+    # Supersede prior findings (kept for history) rather than deleting them,
+    # then write this review's findings.
+    conn.execute(
+        "UPDATE finding SET superseded=1 WHERE content_id=? AND superseded=0",
+        (cid,))
     for f in findings:
         conn.execute(
             "INSERT INTO finding (content_id, category, severity, rule,"
@@ -66,7 +70,7 @@ def run_review_on(conn, row: dict, user: dict,
                  tokens)
     conn.commit()
     stored = db.rows(conn, "SELECT * FROM finding WHERE content_id=? "
-                     "ORDER BY id", (cid,))
+                     "AND superseded=0 ORDER BY id", (cid,))
 
     return ReviewResult(content_id=cid,
                         findings=[Finding(**f) for f in stored],

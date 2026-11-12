@@ -127,6 +127,7 @@ CREATE TABLE IF NOT EXISTS finding (
     accepted    INTEGER NOT NULL DEFAULT 0,   -- 0=pending 1=accepted 2=dismissed
     confidence  REAL NOT NULL DEFAULT 0.6,
     evidence    TEXT NOT NULL DEFAULT '',     -- source attribution
+    superseded  INTEGER NOT NULL DEFAULT 0,   -- 1=replaced by a newer review
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -242,6 +243,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
                                   "confidence REAL NOT NULL DEFAULT 0.6"),
         ("finding", "evidence", "ALTER TABLE finding ADD COLUMN "
                                 "evidence TEXT NOT NULL DEFAULT ''"),
+        ("finding", "superseded", "ALTER TABLE finding ADD COLUMN "
+                                  "superseded INTEGER NOT NULL DEFAULT 0"),
         ("audit", "tokens", "ALTER TABLE audit ADD COLUMN "
                             "tokens INTEGER NOT NULL DEFAULT 0"),
         ("audit", "prev_hash", "ALTER TABLE audit ADD COLUMN "
@@ -281,6 +284,12 @@ def init() -> None:
         try:
             with get() as conn:
                 conn.executescript(pg_schema())
+                try:
+                    conn.execute(
+                        "ALTER TABLE finding ADD COLUMN IF NOT EXISTS "
+                        "superseded INTEGER NOT NULL DEFAULT 0")
+                except Exception as e:
+                    log.warning("finding.superseded migration skipped: %s", e)
                 conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
                 conn.execute(
                     "ALTER TABLE kb_chunk ADD COLUMN IF NOT EXISTS "

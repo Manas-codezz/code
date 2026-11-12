@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 import time
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -13,6 +14,7 @@ from pydantic import BaseModel
 from . import db
 from .auth import current_user, require_role
 from .settings import settings
+from .state import LOCKED, require_transition
 
 router = APIRouter(tags=["workflow"])
 
@@ -109,15 +111,21 @@ def peer_review(cid: int, body: PeerBody,
                 user: dict = Depends(require_role("reviewer"))):
     if body.action not in ("approve", "reject"):
         raise HTTPException(422, "action must be approve|reject")
+    new_status = "peer_review" if body.action == "approve" else "changes"
     with db.get() as conn:
         row = _content(conn, cid)
-        if row["status"] != "review":
-            raise HTTPException(
-                409, f"peer review only from 'review' (now "
-                     f"'{row['status']}') — run the AI review first")
-        new_status = "peer_review" if body.action == "approve" else "changes"
-        conn.execute("UPDATE content SET status=? WHERE id=?",
-                     (new_status, cid))
+        require_transition(row["status"], new_status, user["role"])
+        if new_status == "peer_review":
+            # SLA window restarts for the manager's decision (not just the
+            # original AI review) so peer-review time is accounted for.
+            due = (datetime.now(timezone.utc)
+                   + timedelta(hours=settings.sla_hours)
+                   ).strftime("%Y-%m-%d %H:%M:%S")
+            conn.execute("UPDATE content SET status=?, sla_due_at=? WHERE id=?",
+                         (new_status, due, cid))
+        else:
+            conn.execute("UPDATE content SET status=?, sla_due_at=NULL "
+                         "WHERE id=?", (new_status, cid))
         _snapshot(conn, cid, user["email"])
         db.log_audit(conn, cid, user["email"], f"peer_{body.action}",
                      body.note[:200])
@@ -187,7 +195,7 @@ def edit_content(cid: int, body: ContentPatch,
                  user: dict = Depends(current_user)):
     with db.get() as conn:
         row = _content(conn, cid)
-        if row["status"] in ("approved", "published"):
+        if row["status"] in LOCKED:
             raise HTTPException(403, "approved/published content is locked")
         if body.text is None and body.title is None:
             raise HTTPException(422, "nothing to change")
@@ -198,9 +206,11 @@ def edit_content(cid: int, body: ContentPatch,
         if body.text is not None:
             sets.append("text=?"), args.append(body.text)
         if text_changed:
-            # prior findings belong to the old text — invalidate them
+            # prior findings belong to the old text — supersede them (kept for
+            # history) and drop back to draft
             sets.append("status='draft'")
-            conn.execute("DELETE FROM finding WHERE content_id=?", (cid,))
+            conn.execute("UPDATE finding SET superseded=1 WHERE content_id=?"
+                         " AND superseded=0", (cid,))
         conn.execute(f"UPDATE content SET {', '.join(sets)} WHERE id=?",
                      (*args, cid))
         _snapshot(conn, cid, user["email"])     # record the NEW state
@@ -248,9 +258,10 @@ def remediate(cid: int, body: RemediateBody,
               user: dict = Depends(require_role("reviewer"))):
     with db.get() as conn:
         row = _content(conn, cid)
-        if row["status"] in ("approved", "published"):
+        if row["status"] in LOCKED:
             raise HTTPException(409, "approved/published content is locked")
-        finds = db.rows(conn, "SELECT * FROM finding WHERE content_id=? AND accepted=1", (cid,))
+        finds = db.rows(conn, "SELECT * FROM finding WHERE content_id=? "
+                              "AND accepted=1 AND superseded=0", (cid,))
         if body.finding_ids is not None:
             wants = set(body.finding_ids)
             finds = [f for f in finds if f["id"] in wants]
@@ -270,7 +281,8 @@ def remediate(cid: int, body: RemediateBody,
         if not body.apply:
             return {"applied": applied, "skipped": skipped, "lines": diff}   # preview
         conn.execute("UPDATE content SET text=?, status='draft' WHERE id=?", (new, cid))
-        conn.execute("DELETE FROM finding WHERE content_id=?", (cid,))
+        conn.execute("UPDATE finding SET superseded=1 WHERE content_id=?"
+                     " AND superseded=0", (cid,))
         _snapshot(conn, cid, user["email"])          # reuse existing version capture
         db.log_audit(conn, cid, user["email"], "remediate",
                      f"applied={applied} skipped={skipped}")
@@ -288,10 +300,7 @@ def remediate(cid: int, body: RemediateBody,
 def publish(cid: int, user: dict = Depends(require_role("manager"))):
     with db.get() as conn:
         row = _content(conn, cid)
-        if row["status"] != "approved":
-            raise HTTPException(
-                409, f"only approved content publishes (now "
-                     f"'{row['status']}')")
+        require_transition(row["status"], "published", user["role"])
         import datetime as _dt
         now = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         conn.execute("UPDATE content SET status='published', "
@@ -311,7 +320,12 @@ def publish(cid: int, user: dict = Depends(require_role("manager"))):
 # --- inbound integrations (webhook listener) ------------------------------
 @router.post("/integrations/inbound")
 async def inbound_webhook(request: Request):
-    """External tools (CI, Drive, CMS) trigger review, approval, or publish via HMAC."""
+    """External tools (CI, Drive, CMS) trigger review, approval, or publish via HMAC.
+
+    Each call performs exactly one action (review|approve|publish). Approve and
+    publish bypass the human UI, so they can be disabled with
+    INBOUND_ALLOW_AUTOPUBLISH=0 while keeping the read-only review action.
+    """
     _rate_limit(request)
     if not settings.webhook_secret:
         raise HTTPException(503, "inbound webhook not configured: webhook_secret is unset")
@@ -336,6 +350,10 @@ async def inbound_webhook(request: Request):
         raise HTTPException(400, f"unknown action: {action}")
     if not isinstance(cid, int):
         raise HTTPException(400, "content_id must be an integer")
+    if action in ("approve", "publish") and not settings.inbound_allow_autopublish:
+        raise HTTPException(
+            403, "inbound approve/publish is disabled "
+                 "(INBOUND_ALLOW_AUTOPUBLISH=0)")
 
     actor = "inbound-webhook"
     with db.get() as conn:
@@ -353,7 +371,8 @@ async def inbound_webhook(request: Request):
                 raise HTTPException(
                     409, f"approval only from 'review'/'peer_review' (now '{row['status']}')")
             crit = db.one(conn, "SELECT COUNT(*) n FROM finding WHERE content_id=?"
-                          " AND severity='critical' AND accepted=0", (cid,))["n"]
+                          " AND severity='critical' AND accepted=0"
+                          " AND superseded=0", (cid,))["n"]
             if crit:
                 raise HTTPException(
                     409, f"{crit} unresolved critical finding(s) — accept or dismiss them before approving")

@@ -78,9 +78,9 @@ def guideline_gaps() -> list[dict]:
     with db.get() as conn:
         counts = db.rows(
             conn, "SELECT category, COUNT(*) AS cnt FROM finding "
-                  "WHERE accepted=0 GROUP BY category")
+                  "WHERE accepted=0 AND superseded=0 GROUP BY category")
         rules = db.rows(conn, "SELECT DISTINCT rule FROM finding "
-                              "WHERE accepted=0")
+                              "WHERE accepted=0 AND superseded=0")
         n_chunks = db.one(conn, "SELECT COUNT(*) n FROM kb_chunk")["n"]
     if not counts:
         return []

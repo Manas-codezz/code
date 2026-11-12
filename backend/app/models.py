@@ -4,7 +4,8 @@ from pydantic import BaseModel, Field
 
 Severity = Literal["critical", "warning", "suggestion"]
 Category = Literal["tone", "term", "claim", "a11y", "visual"]
-Status = Literal["draft", "review", "changes", "approved"]
+Status = Literal["draft", "review", "peer_review", "changes", "approved",
+                 "published"]
 
 
 class Finding(BaseModel):
