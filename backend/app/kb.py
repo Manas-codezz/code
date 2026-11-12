@@ -3,12 +3,22 @@ plus bulk import (onboarding wizard) and export (backup/versioning).
 
 Read = any authenticated role (creators must be able to consult the KB);
 write/delete = manager+. Dict bodies keep /docs honest without Pydantic
-boilerplate for four near-identical tables."""
+boilerplate for four near-identical tables.
+
+Also: ingest guideline PDFs/DOCX, auto-chunk+embed into kb_chunk, and
+       persist 256-d vectors (Gemini API or local zlib.crc32 fallback).
+"""
+import io
+import json
 import re
-from fastapi import APIRouter, Depends, HTTPException
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi.responses import JSONResponse
 
 from . import db
 from .auth import current_user, require_role
+from .settings import settings
 
 router = APIRouter(prefix="/kb", tags=["knowledge base"])
 
@@ -72,8 +82,111 @@ def bulk_import(body: dict, user: dict = Depends(require_role("manager"))):
             added[kind] = n
         db.log_audit(conn, None, user["email"], "kb_import",
                      f"added={added} skipped={skipped}")
-        conn.commit()
+    conn.commit()
     return {"added": added, "skipped": skipped}
+
+
+async def _read_file_text(upload: UploadFile) -> str:
+    """Extract text from an uploaded guideline document.
+
+    Extension-dispatched: a corrupt PDF/DOCX returns "" (honest
+    'no text found') instead of decoding binary garbage into chunks."""
+    data = await upload.read()
+    if not data:
+        return ""
+    name = (upload.filename or "").lower()
+    if name.endswith(".pdf"):
+        try:
+            import pypdf
+            reader = pypdf.PdfReader(io.BytesIO(data))
+            return " ".join(page.extract_text() or ""
+                            for page in reader.pages)
+        except Exception:
+            return ""
+    if name.endswith(".docx"):
+        try:
+            import docx
+            doc = docx.Document(io.BytesIO(data))
+            return "\n".join(p.text for p in doc.paragraphs if p.text)
+        except Exception:
+            return ""
+    # .txt / .md / unknown-but-text: best-effort decode
+    return data.decode("utf-8", errors="ignore")
+
+
+CHUNK_SIZE = 1000
+CHUNK_OVERLAP = 150
+
+
+def chunk_text(text: str, size: int = CHUNK_SIZE,
+               overlap: int = CHUNK_OVERLAP) -> list[str]:
+    """~1000-char windows with 150-char overlap, cut on word boundaries."""
+    flat = " ".join(text.split())
+    if not flat:
+        return []
+    chunks, start = [], 0
+    while start < len(flat):
+        end = min(start + size, len(flat))
+        if end < len(flat):
+            cut = flat.rfind(" ", start, end)
+            if cut > start + size // 2:
+                end = cut
+        piece = flat[start:end].strip()
+        if piece:
+            chunks.append(piece)
+        if end >= len(flat):
+            break
+        start = max(end - overlap, start + 1)
+    return chunks
+
+
+@router.post("/ingest", name="kb_ingest")
+async def kb_ingest(
+    file: UploadFile = File(...),
+    user: dict = Depends(require_role("manager")),
+):
+    """Ingest a brand guideline PDF/DOCX/TXT (Living KB v2).
+
+    Extract → chunk (~1000 chars, 150 overlap) → embed (Gemini or local
+    256-d fallback) → store. The JSON embedding is the portable truth;
+    the derived pgvector column is synced when available. Re-ingesting a
+    file replaces its previous chunks. Returns {"chunks", "status", "source"}.
+    """
+    source = Path(file.filename or "document").name
+    text = await _read_file_text(file)
+    if not text.strip():
+        return {"chunks": 0, "status": "no text found", "source": source}
+    chunks = chunk_text(text)
+    if not chunks:
+        return {"chunks": 0, "status": "no usable chunks", "source": source}
+    from .engine.embed import embed_texts
+    embeddings = embed_texts(chunks)          # list[list[float]]
+    added = 0
+    with db.get() as conn:
+        conn.execute("DELETE FROM kb_chunk WHERE source=?", (source,))
+        for i, (chunk, vec) in enumerate(zip(chunks, embeddings)):
+            cur = conn.execute(
+                "INSERT INTO kb_chunk (source, chunk_index, text, embedding)"
+                " VALUES (?,?,?,?) RETURNING id",
+                (source, i, chunk, json.dumps(vec)))
+            db.sync_vector(conn, cur.fetchone()["id"], vec)
+            added += 1
+        db.log_audit(conn, None, user["email"], "kb_ingest",
+                     f"source={source} chunks={added}")
+        conn.commit()
+    return {"chunks": added, "status": "ok", "source": source}
+
+
+@router.get("/documents")
+def kb_documents(_: dict = Depends(current_user)):
+    """Ingested guideline documents with chunk counts (Living KB v2)."""
+    with db.get() as conn:
+        docs = db.rows(
+            conn, "SELECT source, COUNT(*) chunks, MAX(created_at)"
+                  " ingested_at FROM kb_chunk GROUP BY source"
+                  " ORDER BY source")
+        total = sum(d["chunks"] for d in docs)
+    return {"documents": docs, "chunks": total}
 
 
 # --- per-table CRUD (generated from SPEC, one code path) -------------------

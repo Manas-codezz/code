@@ -10,6 +10,7 @@ from fastapi import HTTPException
 
 from . import db
 from .settings import settings
+from .engine.citation import attach_citations
 from .models import Finding, ReviewResult
 from .engine import review as engine, a11y, compliance, visual, vision
 
@@ -39,6 +40,10 @@ def run_review_on(conn, row: dict, user: dict,
         findings += _stamp(vision_findings,
                            "Vision OCR + pixel WCAG (Gemini)")
         tokens += vision_tokens
+
+    # Living KB v2: cite the exact guideline passage behind each finding
+    # (semantic retrieval over kb_chunk — no-op when the KB has no chunks)
+    findings = attach_citations(findings, row["text"])
 
     conn.execute("DELETE FROM finding WHERE content_id=?", (cid,))
     for f in findings:

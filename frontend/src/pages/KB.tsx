@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api, msg, type User } from '../api'
+import { api, ingestGuidelines, msg, type User } from '../api'
 import { ROLE_RANK } from '../App'
 import { Badge, Btn, Empty, Field, inputCls } from '../ui'
-import { ChevronDown, Download, Plus, Trash2, X } from 'lucide-react'
+import { ChevronDown, Download, FileText, Plus, Trash2, X } from 'lucide-react'
 
 type Kind = 'guidelines' | 'glossary' | 'facts' | 'colors'
 
@@ -27,6 +27,8 @@ const GLOSSARY_BADGE_STYLE: Record<string, string> = {
   approved: 'bg-sage/10 text-sage border-sage/25',
 }
 
+interface Doc { source: string; chunks: number; ingested_at: string }
+
 export default function KB({ user }: { user: User }) {
   const [kind, setKind] = useState<Kind>('guidelines')
   const [rows, setRows] = useState<Row[]>([])
@@ -34,6 +36,11 @@ export default function KB({ user }: { user: User }) {
   const [adding, setAdding] = useState(false)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
+  const [ingestBusy, setIngestBusy] = useState(false)
+  const [ingestErr, setIngestErr] = useState('')
+  const [ingestStatus, setIngestStatus] = useState('')
+  const [file, setFile] = useState<File | null>(null)
+  const [docs, setDocs] = useState<Doc[]>([])
 
   const canWrite = ROLE_RANK[user.role] >= ROLE_RANK.manager
   const spec = KINDS.find((k) => k.id === kind)!
@@ -43,8 +50,16 @@ export default function KB({ user }: { user: User }) {
       .catch((e) => setErr(msg(e)))
   }, [])
 
+  const loadDocs = useCallback(() => {
+    api<{ documents: Doc[] }>('/kb/documents')
+      .then((r) => setDocs(r.documents ?? []))
+      .catch(() => setDocs([]))
+  }, [])
+
   useEffect(() => { load(kind); setDraft({}); setAdding(false) },
             [kind, load])
+
+  useEffect(() => { if (canWrite) loadDocs() }, [canWrite, loadDocs])
 
   async function add() {
     setBusy(true); setErr('')
@@ -74,6 +89,20 @@ export default function KB({ user }: { user: User }) {
     URL.revokeObjectURL(a.href)
   }
 
+async function ingestFile() {
+    if (!file) return
+    setIngestBusy(true); setIngestErr(''); setIngestStatus('')
+    try {
+      const result = await ingestGuidelines(file)
+      setIngestStatus(result.chunks
+        ? `Ingested ${result.chunks} chunks from ${result.source ?? file.name}`
+        : `No text found in ${result.source ?? file.name}`)
+      setFile(null)
+      load(kind)
+      loadDocs()
+    } catch (e) { setIngestErr(msg(e)) } finally { setIngestBusy(false) }
+  }
+
   return (
     <div className="space-y-6">
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -92,16 +121,74 @@ export default function KB({ user }: { user: User }) {
               <span>Export JSON</span>
             </span>
           </Btn>
-          {canWrite && (
-            <Btn kind="primary" onClick={() => setAdding((a) => !a)}>
-              <span className="flex items-center gap-1.5">
-                {adding ? <X className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
-                <span>{adding ? 'Cancel' : 'Add Entry'}</span>
-              </span>
-            </Btn>
-          )}
+{canWrite && (
+        <Btn kind="primary" onClick={() => setAdding((a) => !a)}>
+          <span className="flex items-center gap-1.5">
+            {adding ? <X className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+            <span>{adding ? 'Cancel' : 'Add Entry'}</span>
+          </span>
+        </Btn>
+      )}
         </div>
       </header>
+
+      {/* Living KB v2 — guideline document ingestion (manager+) */}
+      {canWrite && (
+        <div className="bg-surface-2 border border-hairline rounded-lg p-4 space-y-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted">
+              Living KB v2 — Guideline Document Ingestion
+            </h3>
+            {docs.length > 0 && (
+              <span className="text-[11px] text-faint">
+                {docs.reduce((n, d) => n + d.chunks, 0)} passages indexed
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-muted">
+            Upload a brand guideline PDF, DOCX, or TXT — it is chunked,
+            embedded, and cited as the source passage in every finding.
+          </p>
+          <div className="flex items-center gap-3 flex-wrap">
+            <input
+              type="file"
+              accept=".pdf,.docx,.txt,.md"
+              className="file-input block cursor-pointer bg-surface rounded border border-hairline text-sm px-3 py-2"
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            />
+            {file && (
+              <Btn kind="ghost" onClick={ingestFile} disabled={ingestBusy}>
+                {ingestBusy ? 'Ingesting…' : 'Ingest Document'}
+              </Btn>
+            )}
+          </div>
+          {file && (
+            <div className="text-xs text-ink">Selected: {file.name}</div>
+          )}
+          {ingestErr && (
+            <div className="text-xs text-danger">{ingestErr}</div>
+          )}
+          {ingestStatus && (
+            <div className="text-xs text-sage">{ingestStatus}</div>
+          )}
+          {docs.length > 0 && (
+            <ul className="divide-y divide-hairline border-t border-hairline pt-1">
+              {docs.map((d) => (
+                <li key={d.source}
+                    className="flex items-center justify-between gap-3 py-1.5 text-xs">
+                  <span className="flex items-center gap-1.5 text-ink min-w-0">
+                    <FileText className="w-3.5 h-3.5 text-muted shrink-0" />
+                    <span className="truncate">{d.source}</span>
+                  </span>
+                  <span className="text-muted shrink-0">
+                    {d.chunks} chunks · {d.ingested_at}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex border-b border-hairline gap-2 overflow-x-auto pb-0.5">

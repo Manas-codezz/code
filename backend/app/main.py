@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 
 from . import db
 from .settings import settings
+from .engine.citation import guideline_gaps
 from .models import (ContentCreate, ContentOut, ContentWithFindings, Finding,
                       FindingPatch, ReviewResult, AnalyticsSummary,
                       CategoryCount, TeamScore, TrendPoint, TrendResponse)
@@ -442,6 +443,14 @@ def analytics(user: dict = Depends(require_role("manager"))):
                 stale.append({**r, "days_old": days_old})
         stale.sort(key=lambda s: s["days_old"], reverse=True)
 
+    # guideline-gap analytics (Living KB v2): recurring finding categories
+    # with no covering passage in the ingested guideline documents
+    gap_summary = [
+        {"category": g["category"], "count": g["count"],
+         "missing": g["missing_passages"]}
+        for g in guideline_gaps()
+    ]
+
     # compliance = approved content with zero unresolved criticals
     compliant = approved
     rate = round(compliant / total * 100, 1) if total else 0.0
@@ -452,7 +461,8 @@ def analytics(user: dict = Depends(require_role("manager"))):
         most_violated_rules=rules, findings_by_severity=by_sev,
         llm_calls=cost.get("calls", 0), total_tokens=cost.get("tok", 0),
         by_team=by_team, heat_map=heat_map,
-        overdue_reviews=overdue, stale_facts=stale)
+        overdue_reviews=overdue, stale_facts=stale,
+        guideline_gaps=gap_summary)
 
 
 @app.get("/analytics/trend", response_model=TrendResponse)

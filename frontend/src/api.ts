@@ -89,6 +89,7 @@ export interface Analytics {  total_content: number
                      sla_due_at: string; hours_late: number }[]
   stale_facts: { id: number; claim: string; source: string
                  verified_at: string; days_old: number }[]
+  guideline_gaps: { category: string; count: number; missing: boolean }[]
 }
 
 const KEY = 'bg.auth'
@@ -216,6 +217,36 @@ export async function upload<T = unknown>(
     throw new ApiError(r.status, m)
   }
   return r.json() as Promise<T>
+}
+
+export type IngestResult = { chunks: number; status: string; source?: string }
+
+/** Ingest a guideline document (PDF/DOCX/TXT) — same auth + refresh as upload(). */
+export async function ingestGuidelines(
+  file: File, retry = true,
+): Promise<IngestResult> {
+  const s = loadAuth()
+  const fd = new FormData()
+  fd.append('file', file)
+  const r = await fetch('/kb/ingest', {
+    method: 'POST',
+    headers: s ? { Authorization: `Bearer ${s.access_token}` } : undefined,
+    body: fd,
+  })
+  if (r.status === 401 && s && retry && await tryRefresh()) {
+    return ingestGuidelines(file, false)
+  }
+  if (!r.ok) {
+    let m = `${r.status}`
+    try {
+      const d = await r.json()
+      m = d.detail
+        ? (typeof d.detail === 'string' ? d.detail : JSON.stringify(d.detail))
+        : m
+    } catch { /* keep status */ }
+    throw new ApiError(r.status, m)
+  }
+  return r.json() as Promise<IngestResult>
 }
 
 export async function login(email: string, password: string): Promise<User> {

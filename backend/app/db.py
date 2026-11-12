@@ -4,8 +4,17 @@ Set DATABASE_URL (postgres://…) to use Postgres; otherwise the SQLite file
 from settings.database_path is used. The same SQL works on both: the
 Postgres adapter rewrites `?` placeholders and returns dict rows.
 """
+import json
 import sqlite3
+import logging
 from .settings import settings
+
+log = logging.getLogger("brandguard.db")
+
+# True when Postgres pgvector column + HNSW index are live (Living KB v2).
+# The JSON `embedding` column is always the portable source of truth;
+# `embedding_vec` is a derived index kept in sync by sync_vector().
+vector_enabled = False
 
 
 def is_postgres() -> bool:
@@ -198,6 +207,15 @@ CREATE TABLE IF NOT EXISTS refresh_token (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS kb_chunk (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    source      TEXT NOT NULL,
+    chunk_index INTEGER NOT NULL,
+    text        TEXT NOT NULL,
+    embedding   TEXT NOT NULL,          -- JSON vector (portable truth)
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_finding_content ON finding(content_id);
 CREATE INDEX IF NOT EXISTS idx_content_status  ON content(status);
 CREATE INDEX IF NOT EXISTS idx_user_email      ON users(email);
@@ -258,15 +276,57 @@ def _rename_legacy_user(conn: sqlite3.Connection) -> None:
 
 
 def init() -> None:
+    global vector_enabled
     if is_postgres():
-        with get() as conn:
-            conn.executescript(pg_schema())
-            conn.commit()
+        try:
+            with get() as conn:
+                conn.executescript(pg_schema())
+                conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
+                conn.execute(
+                    "ALTER TABLE kb_chunk ADD COLUMN IF NOT EXISTS "
+                    f"embedding_vec vector({int(settings.embed_dim)})")
+                # JSON is the truth; backfill rows ingested before the
+                # derived column existed, then index it for ANN search.
+                try:
+                    conn.execute(
+                        "UPDATE kb_chunk SET embedding_vec = embedding::vector"
+                        " WHERE embedding_vec IS NULL")
+                except Exception as e:
+                    log.warning("pgvector backfill skipped: %s", e)
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS kb_chunk_vec_idx "
+                    "ON kb_chunk USING hnsw (embedding_vec vector_cosine_ops)")
+                conn.commit()
+                vector_enabled = True
+                log.info("pgvector enabled (dim=%s)", settings.embed_dim)
+        except Exception as e:  # no permission -> JSON-only mode
+            vector_enabled = False
+            log.warning("pgvector unavailable, cosine-in-Python: %s", e)
         return
+    vector_enabled = False
     with get() as conn:
         _rename_legacy_user(conn)
         conn.executescript(SCHEMA)
         _migrate(conn)
+
+
+def sync_vector(conn, chunk_id: int, vec: list[float]) -> bool:
+    """Keep the derived pgvector column in sync with the JSON truth.
+
+    No-op (returns False) on SQLite / when pgvector is unavailable —
+    retrieval then falls back to cosine-in-Python over the JSON column.
+    """
+    if not (is_postgres() and vector_enabled):
+        return False
+    try:
+        conn.execute(
+            "UPDATE kb_chunk SET embedding_vec=%s::vector WHERE id=%s",
+            (json.dumps(vec), chunk_id))
+        return True
+    except Exception as e:
+        log.warning("embedding_vec sync failed for kb_chunk %s: %s",
+                    chunk_id, e)
+        return False
 
 
 def rows(conn: sqlite3.Connection, sql: str, args: tuple = ()) -> list[dict]:
