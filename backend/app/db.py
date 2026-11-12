@@ -218,7 +218,7 @@ CREATE TABLE IF NOT EXISTS kb_chunk (
 );
 
 CREATE INDEX IF NOT EXISTS idx_finding_content ON finding(content_id);
-CREATE INDEX IF NOT EXISTS idx_finding_gate    ON finding(content_id, superseded, severity, accepted);
+CREATE INDEX IF NOT EXISTS idx_finding_content_sup ON finding(content_id, superseded);
 CREATE INDEX IF NOT EXISTS idx_content_status  ON content(status);
 CREATE INDEX IF NOT EXISTS idx_content_created ON content(created_at);
 CREATE INDEX IF NOT EXISTS idx_finding_created ON finding(created_at, superseded);
